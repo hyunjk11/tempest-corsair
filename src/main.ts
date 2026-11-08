@@ -23,6 +23,7 @@ declare global {
       audio: () => { muted: boolean; unlocked: boolean; context: string; voices: number; audible: boolean; level: number };
       unlockAudio: () => void;
       debugTone: () => void;
+      startMatch: (phase?: string) => void;
     };
   }
 }
@@ -30,9 +31,10 @@ declare global {
 window.__CORSAIR__ = {
   startStage: (stage, upgrades) => game.debugStart(stage, upgrades),
   status: () => game.status(),
-      snapshot: () => game.debugSnapshot(),
-      storm: () => game.debugStorm(),
-      audio: () => game.audioStatus(),
-      unlockAudio: () => game.unlockAudio(),
-      debugTone: () => game.debugTone(),
-    };
+  snapshot: () => game.debugSnapshot(),
+  storm: () => game.debugStorm(),
+  audio: () => game.audioStatus(),
+  unlockAudio: () => game.unlockAudio(),
+  debugTone: () => game.debugTone(),
+  startMatch: (phase) => game.debugMatch(phase),
+};

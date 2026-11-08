@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cannonProfile, STAGES, upgradeCard } from '../src/sim/balance';
-import { clearSave, parseSave, readSave, writeSave } from '../src/sim/persistence';
+import { clearSave, parseSave, readAnySave, readSave, writeSave } from '../src/sim/persistence';
 import {
   advanceAfterVictory,
   applyUpgrade,
@@ -124,25 +124,30 @@ describe('stage progression and upgrades', () => {
     expect(state.status).toBe('playing');
   });
 
-  it('round-trips a pending upgrade save and rejects corrupt data', () => {
+  it('migrates a chapter save into settings and does not resume that stage', () => {
     const store = memoryStore();
-    const save = {
-      v: 1 as const,
-      stageIndex: 2,
-      gold: 120,
-      upgrades: { hull: 1, sails: 0, cannons: 2 },
-      campaignCleared: false,
-      pendingUpgrade: true,
-      pendingPurchased: false,
-      muted: true,
-      shake: false,
-    };
-    writeSave(store, save);
-    expect(readSave(store)).toEqual(save);
-    expect(parseSave('{"v":2}')).toBeNull();
+    store.setItem(
+      'tempest-corsair-v1',
+      JSON.stringify({
+        v: 1,
+        stageIndex: 5,
+        gold: 400,
+        upgrades: { hull: 3, sails: 3, cannons: 3 },
+        campaignCleared: true,
+        pendingUpgrade: false,
+        pendingPurchased: false,
+        muted: true,
+        shake: false,
+      }),
+    );
+    expect(readAnySave(store)).toEqual({ v: 2, muted: true, shake: false, legacyCampaign: true });
+    const freshSave = { v: 2 as const, muted: false, shake: true, legacyCampaign: false };
+    writeSave(store, freshSave);
+    expect(readSave(store)).toEqual(freshSave);
     expect(parseSave('not-json')).toBeNull();
     clearSave(store);
     expect(readSave(store)).toBeNull();
+    expect(store.getItem('tempest-corsair-v1')).toBeNull();
   });
 
   it('opens the upgrade screen only from victory', () => {

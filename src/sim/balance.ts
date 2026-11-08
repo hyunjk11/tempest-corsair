@@ -107,20 +107,29 @@ const RAIDER_CANNONS: CannonStats[] = [
   { damage: 9, shots: 2, reload: 1.25, spread: 0.12, shotSpeed: 36, life: 1.34, label: '약탈 포열' },
 ];
 
+const ALLY_CANNONS: CannonStats[] = [
+  { damage: 9, shots: 1, reload: 1.7, spread: 0.06, shotSpeed: 36, life: 1.4, label: '호위 포' },
+  { damage: 10, shots: 1, reload: 1.5, spread: 0.05, shotSpeed: 37, life: 1.45, label: '호위 포' },
+  { damage: 11, shots: 2, reload: 1.4, spread: 0.05, shotSpeed: 38, life: 1.5, label: '호위 포열' },
+  { damage: 12, shots: 2, reload: 1.3, spread: 0.045, shotSpeed: 39, life: 1.55, label: '호위 포열' },
+];
+
 const CANNONS: Record<Faction, CannonStats[]> = {
   player: PLAYER_CANNONS,
   pirate: PIRATE_CANNONS,
   navy: NAVY_CANNONS,
   company: COMPANY_CANNONS,
   raider: RAIDER_CANNONS,
+  ally: ALLY_CANNONS,
 };
 
 export const FACTION_META: Record<Faction, { label: string; color: string }> = {
   player: { label: '아군', color: '#f4e7c4' },
-  pirate: { label: '적색 해적', color: '#e07a62' },
-  navy: { label: '왕립 해군', color: '#8eb7e6' },
-  company: { label: '녹색 상단', color: '#7dcea0' },
+  pirate: { label: '중립 해적', color: '#e07a62' },
+  navy: { label: '적 함대', color: '#8eb7e6' },
+  company: { label: '보물선', color: '#7dcea0' },
   raider: { label: '약탈선', color: '#e0b15a' },
+  ally: { label: '아군 함대', color: '#f0d48a' },
 };
 
 export const UPGRADE_COST: Record<Track, number[]> = {
@@ -322,6 +331,9 @@ export function handlingFor(ship: { faction: Faction; sailTier: number }): { max
   }
   if (ship.faction === 'pirate') {
     return { maxSpeed: sail.maxSpeed * 0.96, turnRate: sail.turnRate * 1.05, accel: sail.accel * 0.95 };
+  }
+  if (ship.faction === 'ally') {
+    return { maxSpeed: sail.maxSpeed * 0.9, turnRate: sail.turnRate * 0.95, accel: sail.accel * 0.9 };
   }
   return { maxSpeed: sail.maxSpeed, turnRate: sail.turnRate, accel: sail.accel };
 }

@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { cannonProfile, FACTION_META, hullStats, playerShipName, STAGES } from '../sim/balance';
 import { forward, sideDirection } from '../sim/math';
-import { clearSave, readSave, writeSave, type SaveData } from '../sim/persistence';
+import { clearSave, readAnySave, writeSave, type SettingsSave } from '../sim/persistence';
+import { beginMatch, buyUpgrade, canBuyUpgrade, dockCost, stepMatch } from '../sim/match';
+import { createFishMesh, createHarborMesh, disposeObject, type HarborView } from '../render/harbor';
 import {
   advanceAfterVictory,
   applyUpgrade,
@@ -11,6 +13,7 @@ import {
   getPlayer,
   openUpgrade,
   retryStage,
+  settleWorld,
   step,
   threatCount,
 } from '../sim/simulation';
@@ -96,6 +99,10 @@ export class Game {
   private last = 0;
   private shake = 0;
   private started = false;
+  private wideView = false;
+  private harborViews: HarborView[] = [];
+  private fishMeshes: THREE.Mesh[] = [];
+  private matchKey = '';
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -115,6 +122,9 @@ export class Game {
       shake: (enabled) => this.setShake(enabled),
       pause: () => this.pause(),
       toggleSound: () => this.toggleSound(),
+      zoom: () => {
+        this.wideView = !this.wideView;
+      },
     });
     this.input = new InputController(() => this.sim.status === 'playing');
     this.bindTouch();
@@ -162,9 +172,19 @@ export class Game {
     gold: number;
     projectiles: number;
     weather: string;
-    player: { x: number; z: number; hp: number; speed: number; heading: number } | null;
+    player: { x: number; z: number; hp: number; speed: number; heading: number; length: number; sailTier: number } | null;
     enemies: { name: string; faction: Faction; hp: number; alive: boolean; x: number; z: number }[];
     kraken: { hp: number; phase: string; alive: boolean } | null;
+    match: null | {
+      level: number;
+      xp: number;
+      xpToNext: number;
+      objective: string;
+      docked: boolean;
+      home: number;
+      away: number;
+      respawn: number;
+    };
   } {
     const player = getPlayer(this.sim);
     return {
@@ -173,12 +193,24 @@ export class Game {
       gold: this.sim.gold,
       projectiles: this.sim.projectiles.length,
       weather: this.sim.weather.phase,
-      player: player ? { x: player.x, z: player.z, hp: player.hp, speed: player.speed, heading: player.heading } : null,
+      player: player ? { x: player.x, z: player.z, hp: player.hp, speed: player.speed, heading: player.heading, length: player.length, sailTier: player.sailTier } : null,
       enemies: this.sim.ships
         .filter((ship) => ship.faction !== 'player')
         .map((ship) => ({ name: ship.name, faction: ship.faction, hp: ship.hp, alive: ship.alive, x: ship.x, z: ship.z })),
       kraken: this.sim.kraken
         ? { hp: this.sim.kraken.hp, phase: this.sim.kraken.phase, alive: this.sim.kraken.alive }
+        : null,
+      match: this.sim.match
+        ? {
+            level: this.sim.match.level,
+            xp: this.sim.match.xp,
+            xpToNext: this.sim.match.xpToNext,
+            objective: this.sim.match.objective,
+            docked: this.sim.match.docked,
+            home: this.sim.match.harbors.find((harbor) => harbor.id === 'home')?.hp ?? 0,
+            away: this.sim.match.harbors.find((harbor) => harbor.id === 'away')?.hp ?? 0,
+            respawn: this.sim.match.respawnLeft,
+          }
         : null,
     };
   }
@@ -188,7 +220,7 @@ export class Game {
     this.sfx.setMuted(muted);
     this.ui.setSettings(this.settings.muted, this.settings.shake);
     this.refreshSound();
-    if (readSave(localStorage)) this.write();
+    if (readAnySave(localStorage)) this.write();
   }
 
   audioStatus(): AudioStatus {
@@ -282,11 +314,11 @@ export class Game {
   }
 
   private boot(): void {
-    const save = readSave(localStorage);
+    const save = readAnySave(localStorage);
     if (!save) {
-    this.ui.setSettings(false, true);
-    this.refreshSound();
-    this.ui.showTitle({ canContinue: false, cleared: false });
+      this.ui.setSettings(false, true);
+      this.refreshSound();
+      this.ui.showTitle({ canContinue: false, cleared: false });
       return;
     }
     this.settings.muted = save.muted;
@@ -294,19 +326,7 @@ export class Game {
     this.sfx.setMuted(save.muted);
     this.ui.setSettings(save.muted, save.shake);
     this.refreshSound();
-    this.progress = {
-      stageIndex: save.stageIndex,
-      gold: save.gold,
-      upgrades: { ...save.upgrades },
-      campaignCleared: save.campaignCleared,
-      pendingUpgrade: save.pendingUpgrade,
-      pendingPurchased: save.pendingPurchased,
-    };
-    this.sim.gold = save.gold;
-    this.sim.upgrades = { ...save.upgrades };
-    this.sim.stageIndex = save.stageIndex;
-    this.sim.campaignCleared = save.campaignCleared;
-    this.ui.showTitle({ canContinue: true, cleared: save.campaignCleared });
+    this.ui.showTitle({ canContinue: false, cleared: save.legacyCampaign });
   }
 
   private frame = (now: number): void => {
@@ -316,7 +336,13 @@ export class Game {
     this.last = now;
     this.time += dt;
     const before = this.sim.status;
-    if (this.sim.status === 'playing') step(this.sim, this.input.snapshot(), dt);
+    if (this.sim.status === 'playing') {
+      step(this.sim, this.input.snapshot(), dt);
+      if (this.sim.match) {
+        stepMatch(this.sim, dt);
+        settleWorld(this.sim);
+      }
+    }
     else if (this.sim.status === 'victory' || this.sim.status === 'defeat' || this.sim.status === 'upgrade' || this.sim.status === 'ending') {
       coast(this.sim, dt);
     }
@@ -356,19 +382,14 @@ export class Game {
 
   private noteTransition(): void {
     if (this.sim.status === 'victory') {
-      this.progress = {
-        stageIndex: this.sim.stageIndex,
-        gold: this.sim.gold,
-        upgrades: { ...this.sim.upgrades },
-        campaignCleared: false,
-        pendingUpgrade: true,
-        pendingPurchased: false,
-      };
       this.write();
-      const stage = STAGES[this.sim.stageIndex];
-      this.ui.showVictory(stage?.name ?? '해역', this.sim.gold, STAGES[this.sim.stageIndex + 1]?.name ?? null);
+      if (this.sim.match) this.ui.showVictory('적 항구 함락', this.sim.gold, null);
+      else {
+        const stage = STAGES[this.sim.stageIndex];
+        this.ui.showVictory(stage?.name ?? '해역', this.sim.gold, STAGES[this.sim.stageIndex + 1]?.name ?? null);
+      }
     } else if (this.sim.status === 'defeat') {
-      this.ui.showDefeat();
+      this.ui.showDefeat(this.sim.match ? '아군 항구가 함락되었다. 다시 출항하면 작은 배로 시작한다.' : undefined);
     }
   }
 
@@ -378,6 +399,7 @@ export class Game {
     this.syncTreasures(storm);
     this.syncKraken();
     this.syncTerrain();
+    this.syncMatchProps();
     this.updateCamera(dt);
     this.fx.sync(this.sim, dt, this.time, this.camera);
     const focusX = this.look.x;
@@ -408,16 +430,58 @@ export class Game {
     this.ui.setHit(player ? player.hitFlash / 0.22 : 0);
   }
 
+  private syncMatchProps(): void {
+    const match = this.sim.match;
+    const key = match ? 'match' : '';
+    if (key === this.matchKey && match) {
+      for (const view of this.harborViews) {
+        const harbor = match.harbors.find((item) => item.id === view.id);
+        view.group.visible = Boolean(harbor && harbor.hp > 0);
+      }
+      match.fish.forEach((spot, index) => {
+        const mesh = this.fishMeshes[index];
+        if (!mesh) return;
+        mesh.visible = spot.cooldown <= 0;
+        mesh.position.y = 0.4 + Math.sin(this.time * 2 + index) * 0.15;
+      });
+      return;
+    }
+    for (const view of this.harborViews) {
+      this.scene.remove(view.group);
+      disposeObject(view.group);
+    }
+    for (const mesh of this.fishMeshes) {
+      this.scene.remove(mesh);
+      disposeObject(mesh);
+    }
+    this.harborViews = [];
+    this.fishMeshes = [];
+    this.matchKey = key;
+    if (!match) return;
+    for (const harbor of match.harbors) {
+      const view = createHarborMesh(harbor);
+      this.scene.add(view.group);
+      this.harborViews.push(view);
+    }
+    for (const spot of match.fish) {
+      const mesh = createFishMesh();
+      mesh.position.set(spot.x, 0.4, spot.z);
+      this.scene.add(mesh);
+      this.fishMeshes.push(mesh);
+    }
+  }
+
   private syncTerrain(): void {
     if (this.sim.ships.length === 0) {
       this.clearTerrain();
       return;
     }
-    const key = `${this.sim.stageIndex}:${STAGES[this.sim.stageIndex]?.terrain.length ?? 0}`;
+    const terrain = this.sim.terrainOverride ?? STAGES[this.sim.stageIndex]?.terrain ?? [];
+    const key = `${this.sim.match ? 'match' : this.sim.stageIndex}:${terrain.length}`;
     if (key === this.terrainKey) return;
     this.clearTerrain();
     this.terrainKey = key;
-    for (const body of STAGES[this.sim.stageIndex]?.terrain ?? []) {
+    for (const body of terrain) {
       const mesh = createTerrainMesh(body);
       this.scene.add(mesh);
       this.terrainMeshes.push(mesh);
@@ -538,7 +602,8 @@ export class Game {
       const player = getPlayer(this.sim);
       if (player) {
         const nose = forward(player.heading);
-        const zoom = this.sim.kraken?.alive ? 1.08 : 1;
+        const spread = this.wideView ? 1.65 : 1;
+        const zoom = (this.sim.kraken?.alive ? 1.08 : 1) * spread;
         const focus = new THREE.Vector3(player.x + nose.x * 12, 1.5, player.z + nose.z * 12);
         const desired = new THREE.Vector3(player.x - nose.x * 30 * zoom, 17.5 * zoom, player.z - nose.z * 30 * zoom);
         desired.x += Math.sin(this.time * 1.7) * 0.35 * this.sim.weather.intensity;
@@ -590,22 +655,44 @@ export class Game {
       banner = this.sim.introText;
       bannerKind = 'info';
     }
+    const match = this.sim.match;
+    const home = match?.harbors.find((harbor) => harbor.id === 'home');
+    const away = match?.harbors.find((harbor) => harbor.id === 'away');
+    const dock = match?.docked
+      ? {
+          hull: this.dockLabel('hull'),
+          sails: this.dockLabel('sails'),
+          cannons: this.dockLabel('cannons'),
+          hullOk: this.dockReady('hull'),
+          sailsOk: this.dockReady('sails'),
+          cannonsOk: this.dockReady('cannons'),
+        }
+      : null;
+    if (match) {
+      banner = match.objective;
+      bannerKind = match.downed || this.sim.weather.phase === 'warning' || this.sim.weather.phase === 'storm' ? 'alert' : 'info';
+    }
     this.ui.setHud({
-      chapter: `제${stage.chapter}장 · ${stage.chapterTitle}`,
-      stage: stage.name,
+      chapter: match ? '항구 공성' : `제${stage.chapter}장 · ${stage.chapterTitle}`,
+      stage: match ? `Lv ${match.level} · 경험 ${match.xp}/${match.xpToNext}` : stage.name,
       gold: this.sim.gold,
       enemies: threatCount(this.sim),
       enemyLabel: krakenAlive && !hostileShips ? '크라켄' : '적선',
       hull: player.hp / player.maxHp,
       hullText: `${Math.max(0, Math.ceil(player.hp))} / ${player.maxHp}`,
-      port: 1 - player.reloadPort / guns.reload,
-      starboard: 1 - player.reloadStarboard / guns.reload,
+      port: 1 - player.reloadPort / Math.max(0.01, guns.reload),
+      starboard: 1 - player.reloadStarboard / Math.max(0.01, guns.reload),
       kraken: krakenAlive && this.sim.kraken ? this.sim.kraken.hp / this.sim.kraken.maxHp : null,
-      sailHint: this.sim.stageIndex === 0 && this.sim.stageTime < 12 && Math.abs(player.speed) < 2.4,
-      fireHint: this.sim.stageIndex === 0 && this.sim.shotsFired === 0 && this.sim.stageTime > 2.2 && this.sim.stageTime < 18,
+      sailHint: Boolean(match) && this.sim.time < 14 && Math.abs(player.speed) < 2.2,
+      fireHint: Boolean(match) && this.sim.shotsFired === 0 && this.sim.time > 3 && this.sim.time < 20,
       banner,
       bannerKind,
       weather: this.sim.weather.phase,
+      levelText: match ? `Lv ${match.level}` : '',
+      homeHp: home ? home.hp / home.maxHp : 0,
+      awayHp: away ? away.hp / away.maxHp : 0,
+      prompt: match?.prompt ?? '',
+      dock,
     });
     const seen = new Set<Faction>();
     const legend: { faction: Faction; label: string; color: string }[] = [];
@@ -619,50 +706,63 @@ export class Game {
     this.refreshSound();
   }
 
+  private dockLabel(track: Track): string {
+    const match = this.sim.match;
+    const tier = this.sim.upgrades[track];
+    const title = track === 'hull' ? '선체' : track === 'sails' ? '돛' : '함포';
+    if (tier >= 3) return `${title} 최대`;
+    const cost = dockCost(track, tier + 1);
+    const need = match && match.level < tier + 1 ? ` Lv${tier + 1}` : '';
+    return `${title} ${cost ?? ''}${need}`;
+  }
+
+  private dockReady(track: Track): boolean {
+    return canBuyUpgrade(this.sim, track).ok;
+  }
+
   private startNew(): void {
     clearSave(localStorage);
     this.sim = createCampaign((Date.now() % 99991) + 1);
-    beginStage(this.sim, 0);
-    this.progress = this.capture(false);
+    beginMatch(this.sim);
     this.write();
     this.sfx.resume();
     this.ui.showPlay();
   }
 
-  private continueGame(): void {
-    const save = readSave(localStorage);
-    if (!save) {
-      this.startNew();
-      return;
+  debugMatch(phase?: string): void {
+    if (!this.renderer) return;
+    this.sim = createCampaign(5);
+    beginMatch(this.sim);
+    const player = getPlayer(this.sim);
+    const match = this.sim.match;
+    if (phase === 'dock' && player && match) {
+      match.level = 2;
+      match.xp = 0;
+      match.xpToNext = 86;
+      this.sim.gold = 220;
+      player.x = -6;
+      player.z = -60;
+    } else if (phase === 'objective' && match) {
+      this.sim.time = 72;
+      stepMatch(this.sim, 0.05);
+    } else if (phase === 'siege' && player && match) {
+      match.level = 3;
+      this.sim.gold = 40;
+      this.sim.upgrades = { hull: 1, sails: 1, cannons: 2 };
+      player.cannonTier = 2;
+      player.sailTier = 1;
+      player.hullTier = 1;
+      player.hp = player.maxHp = 150;
+      player.x = 0;
+      player.z = 48;
+      player.heading = 0;
     }
-    this.sim.gold = save.gold;
-    this.sim.upgrades = { ...save.upgrades };
-    this.sim.stageIndex = save.stageIndex;
-    this.sim.campaignCleared = save.campaignCleared;
-    this.progress = {
-      stageIndex: save.stageIndex,
-      gold: save.gold,
-      upgrades: { ...save.upgrades },
-      campaignCleared: save.campaignCleared,
-      pendingUpgrade: save.pendingUpgrade,
-      pendingPurchased: save.pendingPurchased,
-    };
-    if (save.campaignCleared && !save.pendingUpgrade) {
-      this.sim.status = 'ending';
-      this.ui.showEnding();
-      return;
-    }
-    if (save.pendingUpgrade) {
-      this.sim.status = 'upgrade';
-      this.sim.upgradeReady = !save.pendingPurchased;
-      this.ui.showUpgrade(this.sim);
-      return;
-    }
-    beginStage(this.sim, save.stageIndex);
-    this.progress = this.capture(false);
     this.write();
-    this.sfx.resume();
     this.ui.showPlay();
+  }
+
+  private continueGame(): void {
+    this.startNew();
   }
 
   private pause(): void {
@@ -678,7 +778,14 @@ export class Game {
   }
 
   private retry(): void {
-    if (this.sim.ships.length === 0 && this.sim.status !== 'defeat' && this.sim.status !== 'paused') return;
+    if (this.sim.match || this.sim.status === 'victory' || this.sim.status === 'defeat') {
+      this.sim = createCampaign((Date.now() % 99991) + 1);
+      beginMatch(this.sim);
+      this.write();
+      this.ui.showPlay();
+      return;
+    }
+    if (this.sim.ships.length === 0 && this.sim.status !== 'paused') return;
     retryStage(this.sim);
     this.progress = this.capture(false);
     this.write();
@@ -687,16 +794,26 @@ export class Game {
 
   private toTitle(): void {
     this.sim.status = 'title';
-    const save = readSave(localStorage);
-    this.ui.showTitle({ canContinue: Boolean(save), cleared: Boolean(save?.campaignCleared) });
+    const save = readAnySave(localStorage);
+    this.ui.showTitle({ canContinue: false, cleared: Boolean(save?.legacyCampaign) });
   }
 
   private toUpgrade(): void {
+    if (this.sim.match) {
+      this.retry();
+      return;
+    }
     openUpgrade(this.sim);
     this.ui.showUpgrade(this.sim);
   }
 
   private buy(track: Track): void {
+    if (this.sim.match) {
+      const result = buyUpgrade(this.sim, track);
+      if (!result.ok) return;
+      this.sfx.pickup();
+      return;
+    }
     const result = applyUpgrade(this.sim, track);
     if (!result.ok) return;
     this.progress.gold = this.sim.gold;
@@ -741,23 +858,18 @@ export class Game {
   }
 
   private write(): void {
-    const data: SaveData = {
-      v: 1,
-      stageIndex: this.progress.stageIndex,
-      gold: this.progress.gold,
-      upgrades: { ...this.progress.upgrades },
-      campaignCleared: this.progress.campaignCleared,
-      pendingUpgrade: this.progress.pendingUpgrade,
-      pendingPurchased: this.progress.pendingPurchased,
+    const data: SettingsSave = {
+      v: 2,
       muted: this.settings.muted,
       shake: this.settings.shake,
+      legacyCampaign: false,
     };
     writeSave(localStorage, data);
   }
 
   private setShake(enabled: boolean): void {
     this.settings.shake = enabled;
-    if (readSave(localStorage)) this.write();
+    if (readAnySave(localStorage)) this.write();
   }
 
   private bindTouch(): void {
@@ -775,7 +887,11 @@ export class Game {
   private onKey = (event: KeyboardEvent): void => {
     if (event.repeat) return;
     if (this.sim.status === 'playing' || this.sim.status === 'title') this.sfx.unlock();
-    if (event.code === 'KeyR' && (this.sim.status === 'paused' || this.sim.status === 'defeat')) {
+    if (event.code === 'KeyZ' && this.sim.status === 'playing') {
+      this.wideView = !this.wideView;
+      return;
+    }
+    if (event.code === 'KeyR' && (this.sim.status === 'paused' || this.sim.status === 'defeat' || this.sim.status === 'victory')) {
       this.retry();
       return;
     }

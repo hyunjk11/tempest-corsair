@@ -223,6 +223,39 @@ kbd {
 .sound-note { margin: 8px 0 12px; color: #d9cbb0; font-size: 14px; }
 #btn-sound-title { margin-top: 4px; }
 
+.ports {
+  position: absolute;
+  top: 78px;
+  right: 16px;
+  display: grid;
+  gap: 6px;
+  width: min(220px, calc(100% - 32px));
+}
+.port-chip { padding: 6px 8px; font-size: 12px; }
+.port-chip .bar { margin-top: 4px; }
+#away-fill { background: linear-gradient(90deg, #1d4e89, #8eb7e6); }
+.prompt {
+  position: absolute;
+  left: 50%;
+  bottom: 168px;
+  transform: translateX(-50%);
+  padding: 8px 12px;
+  max-width: min(420px, calc(100% - 32px));
+  text-align: center;
+}
+.dock { display: flex; gap: 6px; margin-top: 8px; pointer-events: auto; }
+.dock button {
+  flex: 1;
+  border: 1px solid rgba(226, 194, 122, 0.45);
+  background: rgba(8, 16, 24, 0.55);
+  color: #f4ead8;
+  border-radius: 999px;
+  padding: 6px 4px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+.dock button:disabled { opacity: 0.4; }
 .kraken-bar {
   position: absolute;
   top: 148px;
@@ -341,7 +374,10 @@ kbd {
   .cards { grid-template-columns: 1fr; }
   .hud-top { flex-direction: column; align-items: stretch; }
   #radar { width: 88px; height: 88px; flex: none; }
-  .legend { top: 128px; max-width: calc(100% - 24px); }
+  .legend { top: 150px; max-width: calc(100% - 24px); }
+  .ports { top: 108px; right: 8px; width: min(150px, 42vw); }
+  .banner { top: 196px; max-width: calc(100% - 24px); }
+  .prompt { bottom: 250px; }
   .hint { font-size: 13px; }
 }
 

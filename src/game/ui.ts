@@ -18,6 +18,11 @@ export interface HudModel {
   banner: string;
   bannerKind: 'alert' | 'info' | 'none';
   weather: WeatherPhase;
+  levelText: string;
+  homeHp: number;
+  awayHp: number;
+  prompt: string;
+  dock: null | { hull: string; sails: string; cannons: string; hullOk: boolean; sailsOk: boolean; cannonsOk: boolean };
 }
 
 export interface UiHooks {
@@ -36,6 +41,7 @@ export interface UiHooks {
   shake: (enabled: boolean) => void;
   pause: () => void;
   toggleSound: () => void;
+  zoom: () => void;
 }
 
 function must<T extends Element>(id: string): T {
@@ -70,6 +76,10 @@ export class Ui {
     must<HTMLButtonElement>('btn-touch-pause').addEventListener('click', hooks.pause);
     must<HTMLButtonElement>('btn-sound').addEventListener('click', hooks.toggleSound);
     must<HTMLButtonElement>('btn-sound-title').addEventListener('click', hooks.toggleSound);
+    must<HTMLButtonElement>('btn-zoom').addEventListener('click', hooks.zoom);
+    must<HTMLButtonElement>('buy-hull').addEventListener('click', () => hooks.buy('hull'));
+    must<HTMLButtonElement>('buy-sails').addEventListener('click', () => hooks.buy('sails'));
+    must<HTMLButtonElement>('buy-cannons').addEventListener('click', () => hooks.buy('cannons'));
     must<HTMLInputElement>('chk-mute').addEventListener('change', (event) => {
       hooks.mute((event.target as HTMLInputElement).checked);
     });
@@ -151,7 +161,9 @@ export class Ui {
     must<HTMLElement>('victory-name').textContent = name;
     must<HTMLElement>('victory-body').textContent = next
       ? `해역을 돌파했다. 정비 뒤에 다음 바다는 ${next}.`
-      : '마지막 해역을 돌파했다. 정비를 마치고 귀환한다.';
+      : '적 항구가 무너졌다. 다시 출항하면 작은 배에서 시작한다.';
+    const again = document.querySelector('#btn-to-upgrade');
+    if (again) again.textContent = next ? '전열 정비' : '다시 출항';
     must<HTMLElement>('victory-gold').textContent = `보유 금화 ${gold}`;
   }
 
@@ -190,7 +202,11 @@ export class Ui {
     }
   }
 
-  showDefeat(): void {
+  showDefeat(text?: string): void {
+    if (text) {
+      const body = document.querySelector('#screen-defeat p');
+      if (body) body.textContent = text;
+    }
     this.hideScreens();
     must<HTMLElement>('screen-defeat').hidden = false;
     must<HTMLElement>('hud').hidden = true;
@@ -211,7 +227,8 @@ export class Ui {
     gold.textContent = `금화 ${model.gold}`;
     if (this.goldShown >= 0 && model.gold !== this.goldShown) gold.animate([{ transform: 'scale(1.08)' }, { transform: 'scale(1)' }], { duration: 220 });
     this.goldShown = model.gold;
-    must<HTMLElement>('hud-enemies').textContent = `${model.enemyLabel} ${model.enemies}`;
+    const enemies = document.querySelector('#hud-enemies');
+    if (enemies) enemies.textContent = `${model.enemyLabel} ${model.enemies}`;
     must<HTMLElement>('hull-text').textContent = model.hullText;
     must<HTMLElement>('hull-fill').style.width = `${Math.max(0, Math.min(1, model.hull)) * 100}%`;
     must<HTMLElement>('port-fill').style.width = `${Math.max(0, Math.min(1, model.port)) * 100}%`;
@@ -229,6 +246,34 @@ export class Ui {
     const chip = must<HTMLElement>('weather-chip');
     chip.hidden = model.weather === 'calm';
     chip.textContent = model.weather === 'warning' ? '태풍 경보' : model.weather === 'storm' ? '태풍' : '바람 잦아드는 중';
+    const level = document.querySelector('#hud-level');
+    if (level) level.textContent = model.levelText;
+    const home = document.querySelector<HTMLElement>('#home-fill');
+    const away = document.querySelector<HTMLElement>('#away-fill');
+    if (home) home.style.width = `${Math.max(0, Math.min(1, model.homeHp)) * 100}%`;
+    if (away) away.style.width = `${Math.max(0, Math.min(1, model.awayHp)) * 100}%`;
+    const ports = document.querySelector<HTMLElement>('#ports');
+    if (ports) ports.hidden = model.levelText === '';
+    const prompt = document.querySelector<HTMLElement>('#harvest-prompt');
+    if (prompt) {
+      prompt.hidden = model.prompt === '';
+      prompt.textContent = model.prompt;
+    }
+    const dock = document.querySelector<HTMLElement>('#dock');
+    if (dock) {
+      dock.hidden = model.dock === null;
+      if (model.dock) {
+        const hull = must<HTMLButtonElement>('buy-hull');
+        const sails = must<HTMLButtonElement>('buy-sails');
+        const cannons = must<HTMLButtonElement>('buy-cannons');
+        hull.textContent = model.dock.hull;
+        sails.textContent = model.dock.sails;
+        cannons.textContent = model.dock.cannons;
+        hull.disabled = !model.dock.hullOk;
+        sails.disabled = !model.dock.sailsOk;
+        cannons.disabled = !model.dock.cannonsOk;
+      }
+    }
   }
 
   setHit(amount: number): void {

@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="해적선 — 브라우저에서 항해하고 포격하는 3D 해상 전투. Tempest Corsair." />
+    <title>해적선 · Tempest Corsair</title>
+  </head>
+  <body>
+    <canvas id="sea" tabindex="0" aria-label="해상 전투 화면"></canvas>
+    <div id="vignette" aria-hidden="true"></div>
+    <div id="hit-flash" aria-hidden="true"></div>
+    <div id="ui">
+      <section id="screen-title" class="sheet">
+        <div class="card title-card">
+          <p class="kicker">열린 바다의 교전</p>
+          <h1>해적선</h1>
+          <p class="latin">TEMPEST CORSAIR</p>
+          <p class="lede">
+            작은 범선으로 출항해 해적과 왕립 해군을 현측 포격으로 가르고, 떠다니는 보물을 건진다.
+            가끔 태풍이 다가오고, 마지막 해역에는 크라켄이 기다린다.
+          </p>
+          <p id="title-cleared" class="cleared" hidden>이 항로는 이미 열렸다. 기록을 이으면 엔딩으로, 새 항해는 작은 배에서 다시 시작한다.</p>
+          <div class="actions">
+            <button id="btn-start" class="btn" type="button">출항하기</button>
+            <button id="btn-continue" class="btn" type="button" hidden>이어하기</button>
+            <button id="btn-new" class="btn secondary" type="button" hidden>새 항해</button>
+          </div>
+          <div id="title-confirm" class="confirm" hidden>
+            <p>기록을 지우고 선체·돛·함포를 처음 상태로 되돌린다.</p>
+            <div class="actions">
+              <button id="btn-confirm-reset" class="btn" type="button">기록을 지운다</button>
+              <button id="btn-cancel-reset" class="btn secondary" type="button">그만둔다</button>
+            </div>
+          </div>
+          <ul class="controls">
+            <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 또는 방향키로 항해</li>
+            <li><kbd>Q</kbd> 좌현 포격 · <kbd>E</kbd> 우현 포격</li>
+            <li><kbd>Space</kbd> 또는 클릭으로 가까운 적에게 조준 포격</li>
+            <li><kbd>Esc</kbd> 또는 <kbd>P</kbd> 일시정지</li>
+          </ul>
+          <p id="fatal" class="fatal" hidden></p>
+        </div>
+      </section>
+
+      <section id="screen-pause" class="sheet" hidden>
+        <div class="card narrow">
+          <p class="kicker">항해 중지</p>
+          <h2>일시정지</h2>
+          <label class="check"><input id="chk-mute" type="checkbox" /> 음향 끄기</label>
+          <label class="check"><input id="chk-shake" type="checkbox" checked /> 화면 흔들림</label>
+          <div class="actions column">
+            <button id="btn-resume" class="btn" type="button">계속 항해</button>
+            <button id="btn-retry-pause" class="btn secondary" type="button">이 해역 다시</button>
+            <button id="btn-title-pause" class="btn secondary" type="button">타이틀로</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="screen-victory" class="sheet" hidden>
+        <div class="card narrow">
+          <p class="kicker">해역 돌파</p>
+          <h2 id="victory-name">승리</h2>
+          <p id="victory-body"></p>
+          <p id="victory-gold" class="gold-line"></p>
+          <button id="btn-to-upgrade" class="btn" type="button">전열 정비</button>
+        </div>
+      </section>
+
+      <section id="screen-upgrade" class="sheet" hidden>
+        <div class="card wide">
+          <p class="kicker">항구의 정비</p>
+          <h2>배를 고친다</h2>
+          <p class="lede tight">강화는 한 번만 고를 수 있다. 선체, 돛, 함포는 전투와 배의 모습을 함께 바꾼다. 출항하면 선체는 완전히 수리된다.</p>
+          <p id="upgrade-gold" class="gold-line"></p>
+          <p id="upgrade-build"></p>
+          <div id="upgrade-cards" class="cards"></div>
+          <button id="btn-sail" class="btn" type="button">다음 해역으로</button>
+        </div>
+      </section>
+
+      <section id="screen-defeat" class="sheet" hidden>
+        <div class="card narrow">
+          <p class="kicker">침몰</p>
+          <h2>격침</h2>
+          <p>바다가 선체를 삼켰다. 다시 도전하면 이번 해역에서 주운 금화는 시작 값으로 돌아간다. 이미 고친 배는 남는다.</p>
+          <div class="actions">
+            <button id="btn-retry" class="btn" type="button">다시 도전</button>
+            <button id="btn-title-defeat" class="btn secondary" type="button">타이틀로</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="screen-ending" class="sheet" hidden>
+        <div class="card narrow">
+          <p class="kicker">제3장 · 심연</p>
+          <h2>항로를 열었다</h2>
+          <p>크라켄은 깊은 곳으로 물러갔고, 태풍의 바다는 당신의 깃발을 기억한다.</p>
+          <div class="actions">
+            <button id="btn-ending-new" class="btn" type="button">새 항해</button>
+            <button id="btn-ending-title" class="btn secondary" type="button">타이틀로</button>
+          </div>
+        </div>
+      </section>
+
+      <div id="hud" hidden>
+        <header class="hud-top">
+          <div class="glass hud-title">
+            <p id="hud-chapter"></p>
+            <strong id="hud-stage"></strong>
+          </div>
+          <div class="glass hud-stats">
+            <span id="hud-gold">금화 0</span>
+            <span id="hud-enemies">적선 0</span>
+            <button id="btn-pause" class="text-btn" type="button">일시정지</button>
+          </div>
+        </header>
+        <div id="banner" class="glass banner" hidden>
+          <p id="banner-text"></p>
+        </div>
+        <div id="weather-chip" class="glass chip" hidden>태풍</div>
+        <div id="kraken-wrap" class="glass kraken-bar" hidden>
+          <span>크라켄</span>
+          <div class="bar"><span id="kraken-fill"></span></div>
+        </div>
+        <div class="hud-bottom">
+          <div class="glass hull-panel">
+            <div class="row">
+              <span>선체</span>
+              <span id="hull-text">100 / 100</span>
+            </div>
+            <div class="bar hull"><span id="hull-fill"></span></div>
+            <div class="broadsides">
+              <div>
+                <span>좌현 Q</span>
+                <div class="bar"><span id="port-fill"></span></div>
+              </div>
+              <div>
+                <span>우현 E</span>
+                <div class="bar"><span id="star-fill"></span></div>
+              </div>
+            </div>
+            <p id="sail-hint" class="hint" hidden>W 또는 ↑ 로 돛을 펼치세요</p>
+            <p id="fire-hint" class="hint" hidden>Q · E 로 현측을, Space 로 조준 포격을</p>
+          </div>
+          <canvas id="radar" width="160" height="160" aria-label="해역 지도"></canvas>
+        </div>
+      </div>
+
+      <div id="touch">
+        <div id="stick" class="stick"><div id="nub"></div></div>
+        <div class="touch-buttons">
+          <button id="btn-touch-port" type="button">좌현</button>
+          <button id="btn-touch-smart" type="button">조준</button>
+          <button id="btn-touch-star" type="button">우현</button>
+          <button id="btn-touch-pause" type="button">정지</button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

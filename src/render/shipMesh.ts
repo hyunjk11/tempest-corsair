@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { cannonProfile } from '../sim/balance';
+import { cannonProfile, FACTION_META } from '../sim/balance';
 import type { Faction } from '../sim/types';
 import { softCircleTexture } from './textures';
 
@@ -73,6 +73,28 @@ const PALETTE: Record<Faction, Palette> = {
     flag: '#f7f8fb',
     stripe: '#e0c36a',
     torn: 0,
+  },
+  company: {
+    above: '#3f7a62',
+    below: '#1d3b32',
+    rail: '#efe6cf',
+    deck: '#cbb892',
+    sail: '#e7f6ee',
+    sailAlt: '#b7d7c6',
+    flag: '#1f8a4c',
+    stripe: '#e6c45a',
+    torn: 0,
+  },
+  raider: {
+    above: '#a7844a',
+    below: '#4a351c',
+    rail: '#e6d3b0',
+    deck: '#c4a36a',
+    sail: '#e6c36a',
+    sailAlt: '#8d6a32',
+    flag: '#1a120c',
+    stripe: '#c47a2c',
+    torn: 1,
   },
 };
 
@@ -262,7 +284,7 @@ function drawBar(
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = 'rgba(8, 16, 24, 0.78)';
   ctx.fillRect(0, 0, width, height);
-  ctx.fillStyle = faction === 'player' ? '#e2c27a' : faction === 'navy' ? '#8eb7e6' : '#e07a62';
+  ctx.fillStyle = FACTION_META[faction].color;
   const ratio = Math.max(0, Math.min(1, hp / Math.max(1, maxHp)));
   ctx.fillRect(8, 22, (width - 16) * ratio, 10);
   ctx.fillStyle = '#f6f1e6';
@@ -364,18 +386,31 @@ export function createShipMesh(spec: ShipSpec): ShipView {
   const main = masts[0];
   flag.position.set(0.38, 0.9 + (main?.h ?? 5), (main?.z ?? 0) + 0.05);
   group.add(flag);
+  const emblemMat = new THREE.MeshBasicMaterial({
+    color:
+      spec.faction === 'navy'
+        ? '#1d4e89'
+        : spec.faction === 'company'
+          ? '#f2d56b'
+          : spec.faction === 'raider'
+            ? '#e6c36a'
+            : '#f0e2c4',
+    side: THREE.DoubleSide,
+  });
   if (spec.faction === 'navy') {
-    const canton = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.22, 0.16),
-      new THREE.MeshBasicMaterial({ color: '#1d4e89', side: THREE.DoubleSide }),
-    );
+    const canton = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.16), emblemMat);
     canton.position.set(-0.2, 0.1, 0.02);
     flag.add(canton);
+  } else if (spec.faction === 'company') {
+    const bar = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.08), emblemMat);
+    bar.position.z = 0.02;
+    flag.add(bar);
+  } else if (spec.faction === 'raider') {
+    const tooth = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.16, 3), emblemMat);
+    tooth.position.z = 0.02;
+    flag.add(tooth);
   } else if (spec.faction === 'pirate') {
-    const mark = new THREE.Mesh(
-      new THREE.CircleGeometry(0.08, 10),
-      new THREE.MeshBasicMaterial({ color: '#f0e2c4', side: THREE.DoubleSide }),
-    );
+    const mark = new THREE.Mesh(new THREE.CircleGeometry(0.08, 10), emblemMat);
     mark.position.z = 0.02;
     flag.add(mark);
   }

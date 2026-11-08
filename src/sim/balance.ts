@@ -1,4 +1,5 @@
 import { clamp } from './math';
+import type { TerrainBody } from './terrain';
 import type { Faction, SimState, Track, Upgrades } from './types';
 
 export interface HullStats {
@@ -28,7 +29,7 @@ export interface CannonStats {
 }
 
 export interface EnemySpawn {
-  kind: 'pirate' | 'navy';
+  kind: Exclude<Faction, 'player'>;
   name: string;
   x: number;
   z: number;
@@ -54,6 +55,7 @@ export interface StageDef {
   typhoonDelay: number;
   clearBonus: number;
   bounds: number;
+  terrain: TerrainBody[];
 }
 
 export const HULL: HullStats[] = [
@@ -91,6 +93,36 @@ const NAVY_CANNONS: CannonStats[] = [
   { damage: 11, shots: 3, reload: 1.55, spread: 0.036, shotSpeed: 40, life: 1.72, label: '해군 중포' },
 ];
 
+const COMPANY_CANNONS: CannonStats[] = [
+  { damage: 8, shots: 1, reload: 1.9, spread: 0.05, shotSpeed: 36, life: 1.55, label: '상단 포' },
+  { damage: 9, shots: 2, reload: 1.75, spread: 0.048, shotSpeed: 37, life: 1.6, label: '상단 포열' },
+  { damage: 10, shots: 2, reload: 1.62, spread: 0.045, shotSpeed: 38, life: 1.64, label: '상단 포열' },
+  { damage: 11, shots: 2, reload: 1.5, spread: 0.042, shotSpeed: 39, life: 1.68, label: '상단 중포' },
+];
+
+const RAIDER_CANNONS: CannonStats[] = [
+  { damage: 6, shots: 1, reload: 1.7, spread: 0.18, shotSpeed: 33, life: 1.2, label: '약탈 포' },
+  { damage: 7, shots: 1, reload: 1.45, spread: 0.16, shotSpeed: 34, life: 1.25, label: '약탈 포' },
+  { damage: 8, shots: 2, reload: 1.35, spread: 0.14, shotSpeed: 35, life: 1.3, label: '약탈 포열' },
+  { damage: 9, shots: 2, reload: 1.25, spread: 0.12, shotSpeed: 36, life: 1.34, label: '약탈 포열' },
+];
+
+const CANNONS: Record<Faction, CannonStats[]> = {
+  player: PLAYER_CANNONS,
+  pirate: PIRATE_CANNONS,
+  navy: NAVY_CANNONS,
+  company: COMPANY_CANNONS,
+  raider: RAIDER_CANNONS,
+};
+
+export const FACTION_META: Record<Faction, { label: string; color: string }> = {
+  player: { label: '아군', color: '#f4e7c4' },
+  pirate: { label: '적색 해적', color: '#e07a62' },
+  navy: { label: '왕립 해군', color: '#8eb7e6' },
+  company: { label: '녹색 상단', color: '#7dcea0' },
+  raider: { label: '약탈선', color: '#e0b15a' },
+};
+
 export const UPGRADE_COST: Record<Track, number[]> = {
   hull: [0, 45, 90, 140],
   sails: [0, 40, 80, 125],
@@ -104,130 +136,167 @@ export const STAGES: StageDef[] = [
     chapter: 1,
     chapterTitle: '출항',
     name: '표류하는 약탈자',
-    briefing: '안개 너머에 작은 해적선 한 척이 떠 있다.',
-    objective: '해적선 한 척을 격침하라',
+    briefing: '섬과 암초 사이의 수로에 작은 해적선 한 척이 떠 있다.',
+    objective: '수로를 지나 해적선 한 척을 격침하라',
     playerX: 0,
     playerZ: -16,
     playerHeading: 0,
     enemies: [
-      { kind: 'pirate', name: '밤까마귀', x: 8, z: 26, heading: Math.PI, hp: 36, cannonTier: 0, sailTier: 0 },
+      { kind: 'pirate', name: '밤까마귀', x: 10, z: 30, heading: Math.PI, hp: 36, cannonTier: 0, sailTier: 0 },
     ],
     treasures: [
-      { x: -16, z: 4, gold: 48 },
-      { x: 18, z: 34, gold: 28 },
+      { x: 4, z: -2, gold: 48 },
+      { x: 22, z: 36, gold: 28 },
     ],
     typhoonChance: 0,
     typhoonDelay: 999,
     clearBonus: 24,
     bounds: 78,
+    terrain: [
+      { kind: 'island', x: -12, z: 8, radius: 8 },
+      { kind: 'reef', x: 18, z: 6, radius: 4.2 },
+    ],
   },
   {
     chapter: 1,
     chapterTitle: '출항',
     name: '쌍돛의 습격',
-    briefing: '두 척이 양현에서 거리를 좁힌다.',
-    objective: '해적선 두 척을 격침하라',
+    briefing: '적색 해적 두 척과 황갈 약탈선이 열린 수로에서 맞붙는다.',
+    objective: '해적과 약탈선을 격침하라',
     playerX: 0,
     playerZ: -18,
     playerHeading: 0,
     enemies: [
-      { kind: 'pirate', name: '붉은 돛', x: -20, z: 22, heading: 0.5, hp: 50, cannonTier: 0, sailTier: 1 },
-      { kind: 'pirate', name: '소금이빨', x: 18, z: 40, heading: -2.4, hp: 52, cannonTier: 1, sailTier: 1 },
+      { kind: 'pirate', name: '붉은 돛', x: -22, z: 24, heading: 0.5, hp: 50, cannonTier: 0, sailTier: 1 },
+      { kind: 'pirate', name: '소금이빨', x: 20, z: 38, heading: -2.4, hp: 52, cannonTier: 1, sailTier: 1 },
+      { kind: 'raider', name: '모래벼룩', x: 2, z: 20, heading: 2.4, hp: 40, cannonTier: 0, sailTier: 1 },
     ],
     treasures: [
-      { x: 2, z: 8, gold: 36 },
-      { x: -26, z: 46, gold: 32 },
+      { x: 6, z: 2, gold: 36 },
+      { x: -8, z: 46, gold: 32 },
     ],
     typhoonChance: 0.4,
     typhoonDelay: 32,
     clearBonus: 30,
     bounds: 86,
+    terrain: [
+      { kind: 'coast', x: -36, z: 4, radius: 10 },
+      { kind: 'reef', x: 28, z: 14, radius: 5 },
+    ],
   },
   {
     chapter: 1,
     chapterTitle: '출항',
     name: '왕립 초계',
-    briefing: '해군 초계함이 거리를 유지한 채 포열을 연다.',
-    objective: '해군 초계함을 격침하라',
+    briefing: '왕립 해군이 해적과 약탈선 사이에서 거리를 유지한다. 서쪽 해안은 좌초한다.',
+    objective: '해군과 그 싸움에 낀 배들을 격침하라',
     playerX: 0,
     playerZ: -14,
     playerHeading: 0,
     enemies: [
-      { kind: 'navy', name: 'HMS 갈매기', x: 2, z: 42, heading: Math.PI, hp: 100, cannonTier: 1, sailTier: 0 },
+      { kind: 'navy', name: 'HMS 갈매기', x: 6, z: 42, heading: Math.PI, hp: 100, cannonTier: 1, sailTier: 0 },
+      { kind: 'pirate', name: '갈고리', x: -16, z: 24, heading: 0.4, hp: 48, cannonTier: 1, sailTier: 1 },
+      { kind: 'raider', name: '짧은 닻', x: 18, z: 18, heading: -1.2, hp: 38, cannonTier: 0, sailTier: 1 },
     ],
     treasures: [
-      { x: -22, z: 2, gold: 40 },
-      { x: 20, z: 20, gold: 26 },
+      { x: 8, z: 4, gold: 40 },
+      { x: -6, z: 52, gold: 26 },
     ],
     typhoonChance: 0.28,
     typhoonDelay: 26,
     clearBonus: 36,
     bounds: 88,
+    terrain: [
+      { kind: 'coast', x: -48, z: 0, radius: 16 },
+      { kind: 'reef', x: 22, z: -2, radius: 4.5 },
+    ],
   },
   {
     chapter: 2,
     chapterTitle: '항로',
     name: '금빛 물마루',
-    briefing: '보물이 파도 위에 흩어져 있다. 이 수역은 태풍이 잦다.',
-    objective: '해적을 격침하라. 태풍에 대비하라',
+    briefing: '녹색 상단과 해적, 약탈선이 암초 사이에서 보물을 다툰다. 태풍이 잦다.',
+    objective: '세 깃발을 격침하라. 태풍과 암초를 피하라',
     playerX: 0,
     playerZ: -20,
     playerHeading: 0.15,
     enemies: [
-      { kind: 'pirate', name: '표류자', x: -16, z: 16, heading: 1.05, hp: 62, cannonTier: 1, sailTier: 1 },
-      { kind: 'pirate', name: '야간 도선', x: 24, z: 44, heading: -2.3, hp: 66, cannonTier: 1, sailTier: 2 },
+      { kind: 'pirate', name: '표류자', x: -18, z: 18, heading: 1.05, hp: 62, cannonTier: 1, sailTier: 1 },
+      { kind: 'company', name: '청자호', x: 16, z: 36, heading: Math.PI, hp: 90, cannonTier: 1, sailTier: 1 },
+      { kind: 'raider', name: '물떼새', x: 0, z: 28, heading: 0.2, hp: 44, cannonTier: 1, sailTier: 2 },
     ],
     treasures: [
-      { x: 10, z: 2, gold: 44 },
-      { x: -24, z: 30, gold: 38 },
-      { x: 14, z: 56, gold: 42 },
+      { x: 12, z: -4, gold: 44 },
+      { x: -6, z: 48, gold: 38 },
+      { x: 28, z: 24, gold: 42 },
     ],
     typhoonChance: 0.85,
     typhoonDelay: 16,
     clearBonus: 34,
     bounds: 94,
+    terrain: [
+      { kind: 'reef', x: -8, z: 8, radius: 5 },
+      { kind: 'reef', x: 24, z: 12, radius: 4.5 },
+      { kind: 'island', x: -34, z: 42, radius: 9 },
+    ],
   },
   {
     chapter: 2,
     chapterTitle: '항로',
     name: '교차 사격',
-    briefing: '해적과 해군이 같은 바다에서 포문을 연다.',
-    objective: '해적과 해군을 모두 격침하라',
+    briefing: '해적, 해군, 상단, 약탈선이 두 섬 사이의 바다에서 서로를 친다.',
+    objective: '네 깃발을 모두 격침하라. 그들의 교전을 이용하라',
     playerX: 0,
     playerZ: -22,
     playerHeading: 0,
     enemies: [
-      { kind: 'pirate', name: '검은 닻', x: -26, z: 16, heading: 0.85, hp: 74, cannonTier: 1, sailTier: 2 },
-      { kind: 'navy', name: 'HMS 창끝', x: 8, z: 50, heading: Math.PI, hp: 128, cannonTier: 2, sailTier: 1 },
+      { kind: 'pirate', name: '검은 닻', x: -24, z: 18, heading: 0.85, hp: 74, cannonTier: 1, sailTier: 2 },
+      { kind: 'navy', name: 'HMS 창끝', x: 10, z: 48, heading: Math.PI, hp: 128, cannonTier: 2, sailTier: 1 },
+      { kind: 'company', name: '녹풍', x: -8, z: 36, heading: 0.4, hp: 96, cannonTier: 1, sailTier: 1 },
+      { kind: 'raider', name: '톱날', x: 22, z: 28, heading: -2.2, hp: 46, cannonTier: 1, sailTier: 2 },
     ],
     treasures: [
-      { x: 20, z: -2, gold: 36 },
-      { x: -10, z: 34, gold: 34 },
+      { x: 4, z: 8, gold: 36 },
+      { x: -4, z: 58, gold: 34 },
     ],
     typhoonChance: 0.55,
     typhoonDelay: 20,
     clearBonus: 42,
     bounds: 98,
+    terrain: [
+      { kind: 'island', x: -16, z: 28, radius: 7 },
+      { kind: 'island', x: 18, z: 40, radius: 7 },
+    ],
   },
   {
     chapter: 3,
     chapterTitle: '심연',
     name: '크라켄의 눈',
-    briefing: '바다가 숨을 죽인다. 촉수가 수면 아래에서 기다린다.',
-    objective: '예고된 촉수를 피하며 크라켄을 쓰러뜨려라',
+    briefing: '남쪽 수로만 열려 있다. 입구의 약탈선들이 먼저 싸우고, 분지 안에는 크라켄이 있다.',
+    objective: '수로로 들어가 약탈선을 지나 크라켄을 쓰러뜨려라',
     playerX: 0,
     playerZ: -26,
     playerHeading: 0,
-    enemies: [],
+    enemies: [
+      { kind: 'raider', name: '심연 까마귀', x: -16, z: -2, heading: 0.6, hp: 42, cannonTier: 1, sailTier: 1 },
+      { kind: 'raider', name: '검은 부리', x: 14, z: 0, heading: -2.2, hp: 42, cannonTier: 1, sailTier: 1 },
+    ],
     treasures: [
-      { x: -22, z: -6, gold: 40 },
-      { x: 24, z: 12, gold: 40 },
+      { x: -18, z: -16, gold: 40 },
+      { x: 20, z: -14, gold: 40 },
     ],
     kraken: { x: 0, z: 16, hp: 520 },
     typhoonChance: 0.45,
     typhoonDelay: 28,
     clearBonus: 80,
     bounds: 100,
+    terrain: [
+      { kind: 'reef', x: -24, z: 10, radius: 6 },
+      { kind: 'reef', x: 24, z: 10, radius: 6 },
+      { kind: 'reef', x: -10, z: 28, radius: 4.5 },
+      { kind: 'reef', x: 12, z: 30, radius: 4.5 },
+      { kind: 'island', x: 0, z: 42, radius: 8 },
+    ],
   },
 ];
 
@@ -236,7 +305,7 @@ export function hullStats(tier: number): HullStats {
 }
 
 export function cannonProfile(faction: Faction, tier: number): CannonStats {
-  const table = faction === 'player' ? PLAYER_CANNONS : faction === 'pirate' ? PIRATE_CANNONS : NAVY_CANNONS;
+  const table = CANNONS[faction];
   return table[clamp(Math.round(tier), 0, table.length - 1)] ?? table[0];
 }
 
@@ -244,6 +313,12 @@ export function handlingFor(ship: { faction: Faction; sailTier: number }): { max
   const sail = SAILS[clamp(ship.sailTier, 0, SAILS.length - 1)] ?? SAILS[0];
   if (ship.faction === 'navy') {
     return { maxSpeed: sail.maxSpeed * 0.72, turnRate: sail.turnRate * 0.78, accel: sail.accel * 0.8 };
+  }
+  if (ship.faction === 'company') {
+    return { maxSpeed: sail.maxSpeed * 0.8, turnRate: sail.turnRate * 0.84, accel: sail.accel * 0.86 };
+  }
+  if (ship.faction === 'raider') {
+    return { maxSpeed: sail.maxSpeed * 1.05, turnRate: sail.turnRate * 1.12, accel: sail.accel };
   }
   if (ship.faction === 'pirate') {
     return { maxSpeed: sail.maxSpeed * 0.96, turnRate: sail.turnRate * 1.05, accel: sail.accel * 0.95 };
@@ -257,7 +332,9 @@ export function playerShipName(hullTier: number): string {
 
 export function bountyFor(faction: Faction, stageIndex: number): number {
   if (faction === 'navy') return 36 + stageIndex * 4;
+  if (faction === 'company') return 32 + stageIndex * 4;
   if (faction === 'pirate') return 22 + stageIndex * 3;
+  if (faction === 'raider') return 16 + stageIndex * 2;
   return 0;
 }
 

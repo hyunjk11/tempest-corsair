@@ -1,4 +1,5 @@
 import { playerShipName, STAGES, upgradeCard } from '../sim/balance';
+import type { Faction } from '../sim/types';
 import type { SimState, Track, WeatherPhase } from '../sim/types';
 
 export interface HudModel {
@@ -34,6 +35,7 @@ export interface UiHooks {
   mute: (muted: boolean) => void;
   shake: (enabled: boolean) => void;
   pause: () => void;
+  toggleSound: () => void;
 }
 
 function must<T extends Element>(id: string): T {
@@ -45,6 +47,7 @@ function must<T extends Element>(id: string): T {
 export class Ui {
   readonly radar = must<HTMLCanvasElement>('radar');
   private goldShown = -1;
+  private legendKey = '';
   private readonly hooks: UiHooks;
 
   constructor(hooks: UiHooks) {
@@ -65,6 +68,8 @@ export class Ui {
     must<HTMLButtonElement>('btn-ending-title').addEventListener('click', hooks.title);
     must<HTMLButtonElement>('btn-pause').addEventListener('click', hooks.pause);
     must<HTMLButtonElement>('btn-touch-pause').addEventListener('click', hooks.pause);
+    must<HTMLButtonElement>('btn-sound').addEventListener('click', hooks.toggleSound);
+    must<HTMLButtonElement>('btn-sound-title').addEventListener('click', hooks.toggleSound);
     must<HTMLInputElement>('chk-mute').addEventListener('change', (event) => {
       hooks.mute((event.target as HTMLInputElement).checked);
     });
@@ -82,6 +87,28 @@ export class Ui {
   setSettings(muted: boolean, shake: boolean): void {
     must<HTMLInputElement>('chk-mute').checked = muted;
     must<HTMLInputElement>('chk-shake').checked = shake;
+  }
+
+  setSound(label: string, muted: boolean): void {
+    for (const id of ['btn-sound', 'btn-sound-title']) {
+      must<HTMLButtonElement>(id).textContent = label;
+      must<HTMLButtonElement>(id).setAttribute('aria-pressed', muted ? 'true' : 'false');
+    }
+  }
+
+  setLegend(items: { faction: Faction; label: string; color: string }[]): void {
+    const key = items.map((item) => item.faction).join('|');
+    if (key === this.legendKey) return;
+    this.legendKey = key;
+    const host = must<HTMLElement>('legend');
+    host.replaceChildren();
+    for (const item of items) {
+      const chip = document.createElement('span');
+      const swatch = document.createElement('i');
+      swatch.style.background = item.color;
+      chip.append(swatch, document.createTextNode(item.label));
+      host.append(chip);
+    }
   }
 
   showTitle(options: { canContinue: boolean; cleared: boolean }): void {

@@ -1,4 +1,4 @@
-export type Faction = 'player' | 'pirate' | 'navy';
+export type Faction = 'player' | 'pirate' | 'navy' | 'company' | 'raider';
 export type Side = 'port' | 'starboard';
 export type Track = 'hull' | 'sails' | 'cannons';
 export type Status = 'title' | 'playing' | 'paused' | 'victory' | 'defeat' | 'upgrade' | 'ending';
@@ -28,6 +28,7 @@ export interface Ship {
   sinkT: number;
   hitFlash: number;
   collideCd: number;
+  focusId: string;
 }
 
 export interface Projectile {

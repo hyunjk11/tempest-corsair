@@ -57,9 +57,9 @@ const PALETTE: Record<Faction, Palette> = {
     below: '#7a5436',
     rail: '#f7f1e2',
     deck: '#e6d3a8',
-    sail: '#fff8ea',
-    sailAlt: '#f0e2c0',
-    flag: '#e2c27a',
+    sail: '#e2b84a',
+    sailAlt: '#8d6230',
+    flag: '#f4e7c4',
     stripe: '#2c62b5',
     torn: 0,
   },
@@ -79,9 +79,9 @@ const PALETTE: Record<Faction, Palette> = {
     below: '#24384e',
     rail: '#f0e6cc',
     deck: '#d9d3c4',
-    sail: '#fbfaf6',
-    sailAlt: '#e7e2d6',
-    flag: '#f7f8fb',
+    sail: '#163e6b',
+    sailAlt: '#0c2744',
+    flag: '#d7e6f7',
     stripe: '#e0c36a',
     torn: 0,
   },
@@ -282,6 +282,13 @@ function rope(a: THREE.Vector3, b: THREE.Vector3, material: THREE.Material): THR
   return mesh;
 }
 
+export function allegianceWord(faction: Faction, team?: string): string {
+  if (faction === 'player') return '나';
+  if (team === 'friendly' || faction === 'ally') return '아군';
+  if (team === 'enemy' || faction === 'navy') return '적군';
+  return '해적';
+}
+
 function drawBar(
   ctx: CanvasRenderingContext2D,
   canvas: HTMLCanvasElement,
@@ -289,24 +296,32 @@ function drawBar(
   hp: number,
   maxHp: number,
   faction: Faction,
+  role: string,
 ): void {
   const width = canvas.width;
   const height = canvas.height;
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = 'rgba(8, 16, 24, 0.78)';
+  ctx.fillStyle = 'rgba(8, 16, 24, 0.88)';
   ctx.fillRect(0, 0, width, height);
-  ctx.fillStyle = FACTION_META[faction].color;
+  ctx.fillStyle = faction === 'player' ? '#ffe08a' : FACTION_META[faction].color;
+  ctx.fillRect(0, 0, 18, height);
+  ctx.fillStyle = '#fffaf0';
+  ctx.font = '700 36px "WenQuanYi Micro Hei", sans-serif';
+  ctx.fillText(role, 28, 38);
+  ctx.font = '600 18px "WenQuanYi Micro Hei", sans-serif';
+  ctx.fillStyle = '#d9cbb0';
+  ctx.fillText(name, 120, 34);
   const ratio = Math.max(0, Math.min(1, hp / Math.max(1, maxHp)));
-  ctx.fillRect(8, 22, (width - 16) * ratio, 10);
-  ctx.fillStyle = '#f6f1e6';
-  ctx.font = '700 16px "WenQuanYi Micro Hei", sans-serif';
-  ctx.fillText(name, 8, 16);
+  ctx.fillStyle = 'rgba(255,255,255,0.15)';
+  ctx.fillRect(28, 48, width - 40, 12);
+  ctx.fillStyle = faction === 'player' ? '#ffe08a' : FACTION_META[faction].color;
+  ctx.fillRect(28, 48, (width - 40) * ratio, 12);
 }
 
-export function paintShipBar(view: ShipView, hp: number, maxHp: number): void {
+export function paintShipBar(view: ShipView, hp: number, maxHp: number, role = allegianceWord(view.faction)): void {
   const ctx = view.hpCanvas.getContext('2d');
   if (!ctx) return;
-  drawBar(ctx, view.hpCanvas, view.name, hp, maxHp, view.faction);
+  drawBar(ctx, view.hpCanvas, view.name, hp, maxHp, view.faction, role);
   view.hpTex.needsUpdate = true;
   view.lastHp = hp;
   view.lastMax = maxHp;
@@ -458,15 +473,24 @@ export function createShipMesh(spec: ShipSpec): ShipView {
   );
   shadow.rotation.x = -Math.PI / 2;
 
+  const ringColor = spec.faction === 'player' ? '#ffe08a' : spec.faction === 'ally' ? '#f0d48a' : spec.faction === 'navy' ? '#4aa3ff' : '#ff6b4a';
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(spec.beam * (spec.faction === 'player' ? 1.35 : 1.05), spec.faction === 'player' ? 0.22 : 0.1, 8, 24),
+    new THREE.MeshBasicMaterial({ color: ringColor }),
+  );
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = 0.25;
+  group.add(ring);
+
   const hpCanvas = document.createElement('canvas');
-  hpCanvas.width = 256;
-  hpCanvas.height = 40;
+  hpCanvas.width = 420;
+  hpCanvas.height = 72;
   const hpTex = new THREE.CanvasTexture(hpCanvas);
   hpTex.colorSpace = THREE.SRGBColorSpace;
   const spriteMat = new THREE.SpriteMaterial({ map: hpTex, transparent: true, depthTest: false });
   const sprite = new THREE.Sprite(spriteMat);
-  sprite.scale.set(6.4, 1.05, 1);
-  sprite.position.y = 1.5 + (main?.h ?? 5);
+  sprite.scale.set(spec.faction === 'player' ? 11 : 9.2, spec.faction === 'player' ? 1.9 : 1.6, 1);
+  sprite.position.y = 2.4 + (main?.h ?? 5);
   sprite.renderOrder = 2;
   group.add(sprite);
 

@@ -43,6 +43,9 @@ export interface MatchData {
   result: null | 'victory' | 'defeat';
   objective: string;
   prompt: string;
+  /** Short reward line that stays on the prompt after a kill or haul. */
+  notice: string;
+  noticeLeft: number;
   docked: boolean;
   treasureSpawned: boolean;
   krakenSpawned: boolean;

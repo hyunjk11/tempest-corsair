@@ -259,6 +259,12 @@ export class Ui {
       prompt.hidden = model.prompt === '';
       prompt.textContent = model.prompt;
     }
+    const downed = document.querySelector<HTMLElement>('#downed');
+    if (downed) {
+      const sinking = model.banner.includes('침몰');
+      downed.hidden = !sinking;
+      downed.textContent = sinking ? model.banner : '';
+    }
     const dock = document.querySelector<HTMLElement>('#dock');
     if (dock) {
       dock.hidden = model.dock === null;

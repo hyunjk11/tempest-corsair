@@ -236,6 +236,13 @@ export class Game {
     this.sfx.debugTone();
   }
 
+  /** Test-only lethal hit. The next simulation frame runs the same death path as a kraken slam. */
+  debugHurt(): void {
+    const player = getPlayer(this.sim);
+    if (!player?.alive) return;
+    player.hp = 0;
+  }
+
   private toggleSound(): void {
     this.sfx.unlock();
     this.setMuted(!this.settings.muted);
@@ -535,12 +542,15 @@ export class Game {
       view.group.rotation.z = (aside - y) * 0.65 - ship.helm * 0.08 * Math.min(1, Math.abs(ship.speed) / 8);
       view.shadow.position.set(ship.x, 0.12, ship.z);
       view.hullMat.emissiveIntensity = ship.hitFlash > 0 ? 0.9 : 0;
-      view.sprite.visible = ship.sinkT < 2.4;
       for (const sail of view.sails) {
         sail.uniforms.uTime.value = this.time;
         sail.uniforms.uWind.value = 0.35 + storm * 1.35;
       }
-      if (view.lastHp !== ship.hp || view.lastMax !== ship.maxHp) paintShipBar(view, ship.hp, ship.maxHp);
+      const role = ship.faction === 'player' ? '나' : ship.team === 'friendly' ? '아군' : ship.team === 'enemy' ? '적군' : '해적';
+      if (view.lastHp !== ship.hp || view.lastMax !== ship.maxHp || view.name !== role) paintShipBar(view, ship.hp, ship.maxHp, role);
+      const player = getPlayer(this.sim);
+      const dist = player ? Math.hypot(ship.x - player.x, ship.z - player.z) : 0;
+      view.sprite.visible = ship.sinkT < 2.4 && (ship.faction === 'player' || dist < 90);
     }
   }
 
@@ -613,8 +623,13 @@ export class Game {
           desired.y += (Math.random() - 0.5) * this.shake;
           this.shake = Math.max(0, this.shake - dt * 1.5);
         }
-        this.camPos.lerp(desired, blend);
-        this.look.lerp(focus, blend);
+        if (this.camPos.distanceTo(desired) > 90) {
+          this.camPos.copy(desired);
+          this.look.copy(focus);
+        } else {
+          this.camPos.lerp(desired, blend);
+          this.look.lerp(focus, blend);
+        }
       }
     }
     this.camera.position.copy(this.camPos);
@@ -740,10 +755,11 @@ export class Game {
       match.xp = 0;
       match.xpToNext = 86;
       this.sim.gold = 220;
-      player.x = -6;
-      player.z = -60;
-    } else if (phase === 'objective' && match) {
-      this.sim.time = 72;
+      player.x = -16;
+      player.z = -338;
+    } else if (phase === 'objective' && player && match) {
+      this.sim.time = 120;
+      player.z = -40;
       stepMatch(this.sim, 0.05);
     } else if (phase === 'siege' && player && match) {
       match.level = 3;
@@ -753,8 +769,8 @@ export class Game {
       player.sailTier = 1;
       player.hullTier = 1;
       player.hp = player.maxHp = 150;
-      player.x = 0;
-      player.z = 48;
+      player.x = 20;
+      player.z = 310;
       player.heading = 0;
     }
     this.write();

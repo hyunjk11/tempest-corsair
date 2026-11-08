@@ -132,7 +132,21 @@ function drawMatchMap(ctx: CanvasRenderingContext2D, state: SimState): void {
     ctx.fillStyle = harbor.team === 'friendly' ? '#f0d48a' : '#8eb7e6';
     ctx.fillRect(point.px - 7, point.py - 7, 14, 14);
     ctx.strokeStyle = '#fff6df';
+    ctx.lineWidth = 2;
     ctx.strokeRect(point.px - 7, point.py - 7, 14, 14);
+    ctx.fillStyle = '#fffaf0';
+    ctx.font = '700 12px "WenQuanYi Micro Hei", sans-serif';
+    ctx.textAlign = 'left';
+    const label = harbor.id === 'home' ? '아군 항구' : '적 항구';
+    const textWidth = ctx.measureText(label).width;
+    const inwardX = cx - point.px;
+    const inwardY = cy - point.py;
+    const inward = Math.hypot(inwardX, inwardY) || 1;
+    let textX = point.px + (inwardX / inward) * 18 - textWidth / 2;
+    let textY = point.py + (inwardY / inward) * 18;
+    textX = Math.max(cx - radius + 8, Math.min(cx + radius - 8 - textWidth, textX));
+    textY = Math.max(cy - radius + 14, Math.min(cy + radius - 6, textY));
+    ctx.fillText(label, textX, textY);
   }
   if (state.kraken?.alive) {
     const point = project(state.kraken.x, state.kraken.z);
@@ -141,13 +155,32 @@ function drawMatchMap(ctx: CanvasRenderingContext2D, state: SimState): void {
     ctx.arc(point.px, point.py, 5, 0, Math.PI * 2);
     ctx.fill();
   }
+  const player = state.ships.find((ship) => ship.faction === 'player');
   for (const ship of state.ships) {
-    if (ship.sinkT > 3) continue;
+    if (ship.faction === 'player' || ship.sinkT > 3) continue;
     const point = project(ship.x, ship.z);
-    ctx.fillStyle = ship.faction === 'player' ? '#fff' : FACTION_META[ship.faction].color;
+    ctx.fillStyle = ship.team === 'friendly' ? '#f0d48a' : ship.team === 'enemy' ? '#4aa3ff' : '#ff6b4a';
     ctx.beginPath();
-    ctx.arc(point.px, point.py, ship.faction === 'player' ? 4.5 : 3.2, 0, Math.PI * 2);
+    if (ship.team === 'neutral') {
+      ctx.fillRect(point.px - 3, point.py - 3, 6, 6);
+    } else {
+      ctx.arc(point.px, point.py, 3.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  if (player) {
+    const point = project(player.x, player.z);
+    ctx.save();
+    ctx.translate(point.px, point.py);
+    ctx.rotate(player.heading);
+    ctx.fillStyle = '#fff6df';
+    ctx.beginPath();
+    ctx.moveTo(0, -8);
+    ctx.lineTo(5, 6);
+    ctx.lineTo(-5, 6);
+    ctx.closePath();
     ctx.fill();
+    ctx.restore();
   }
   ctx.restore();
   ctx.beginPath();

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { handlingFor } from '../src/sim/balance';
 import { createCampaign, fireBroadside, getPlayer, settleWorld, step } from '../src/sim/simulation';
 import { MATCH_TERRAIN, beginMatch, buyUpgrade, stepMatch } from '../src/sim/match';
 import { terrainBlocks } from '../src/sim/terrain';
@@ -27,7 +28,21 @@ describe('harbor match', () => {
     for (const point of pads) expect(terrainBlocks(point.x, point.z, point.pad, MATCH_TERRAIN)).toBe(false);
     const home = state.match?.harbors.find((harbor) => harbor.id === 'home');
     const away = state.match?.harbors.find((harbor) => harbor.id === 'away');
-    expect(home && away && Math.hypot(home.x - away.x, home.z - away.z)).toBeGreaterThan(120);
+    const player = state.ships.find((ship) => ship.faction === 'player');
+    const fish = state.match?.fish[0];
+    if (!home || !away || !player || !fish) throw new Error('missing');
+    const speed = handlingFor({ faction: 'player', sailTier: 0 }).maxSpeed;
+    const portSeconds = Math.hypot(home.x - away.x, home.z - away.z) / speed;
+    const fishSeconds = Math.hypot(player.x - fish.x, player.z - fish.z) / speed;
+    expect(portSeconds).toBeGreaterThan(50);
+    expect(fishSeconds).toBeGreaterThan(5);
+    expect(fishSeconds).toBeLessThan(12);
+    for (const ship of state.ships) {
+      if (ship.faction === 'player') continue;
+      const dist = Math.hypot(ship.x - player.x, ship.z - player.z);
+      if (ship.team === 'friendly') expect(ship.z).toBeLessThan(player.z);
+      else expect(dist).toBeGreaterThan(140);
+    }
   });
 
   it('heals from a fish once and then waits out the cooldown', () => {
@@ -53,6 +68,12 @@ describe('harbor match', () => {
     player.hp = 40;
     tick(state, 0.05);
     expect(player.hp).toBeGreaterThan(40);
+    player.hp = player.maxHp;
+    spot.cooldown = 0;
+    tick(state, 0.05);
+    expect(state.match?.prompt).toContain('선체는 이미 가득하다');
+    expect(state.match?.prompt).toContain('금화 +5');
+    expect(state.match?.prompt).not.toContain('수리 +0');
   });
 
   it('levels from a neutral kill and spends that level at the friendly port', () => {
@@ -72,10 +93,13 @@ describe('harbor match', () => {
     expect(pirate.alive).toBe(false);
     expect(state.match.level).toBe(0);
     expect(state.gold).toBeGreaterThan(12);
+    expect(state.match.prompt).toContain(`${pirate.name} 격침`);
+    expect(state.match.prompt).toContain('금화 +18');
+    expect(state.match.prompt).toContain('경험 +22');
     state.match.level = 1;
     state.gold = 40;
-    player.x = -8;
-    player.z = -62;
+    player.x = -16;
+    player.z = -338;
     expect(buyUpgrade(state, 'sails')).toEqual({ ok: true });
     expect(player.sailTier).toBe(1);
     expect(buyUpgrade(state, 'hull')).toMatchObject({ ok: false, reason: 'gold' });
@@ -164,8 +188,16 @@ describe('harbor match', () => {
     expect(state.gold).toBeLessThan(40);
     tick(state, 8.2);
     expect(player.alive).toBe(true);
-    expect(player.z).toBeGreaterThan(-74);
+    expect(player.hp).toBeGreaterThan(40);
+    const homeAgain = state.match.harbors.find((harbor) => harbor.id === 'home');
+    expect(homeAgain && Math.hypot(player.x - homeAgain.x, player.z - homeAgain.z)).toBeLessThan(40);
     expect(state.status).toBe('playing');
+    player.hp = 0;
+    tick(state, 0.05);
+    expect(player.alive).toBe(false);
+    expect(state.match.objective).toContain('침몰');
+    for (let i = 0; i < 30 * 9; i += 1) tick(state, 1 / 30);
+    expect(player.alive).toBe(true);
   });
 
   it('holds the typhoon until after the opening and steers a pusher off a rock', () => {
@@ -174,7 +206,7 @@ describe('harbor match', () => {
     state.time = 30;
     tick(state, 0.2);
     expect(state.weather.phase).toBe('calm');
-    state.time = 86;
+    state.time = 100;
     tick(state, 0.2);
     expect(state.weather.phase).toBe('warning');
     const pusher = state.ships.find((ship) => ship.duty === 'push' && ship.team === 'enemy');
@@ -187,5 +219,61 @@ describe('harbor match', () => {
     for (let i = 0; i < 20; i += 1) tick(state, 1 / 20);
     expect(terrainBlocks(pusher.x, pusher.z, pusher.beam * 0.4, MATCH_TERRAIN)).toBe(false);
     expect(pusher.z).toBeLessThan(before + 1);
+  });
+
+  it('aims the smart shot at a pirate even when an ally is closer', () => {
+    const state = voyage();
+    state.aiEnabled = false;
+    const player = getPlayer(state);
+    const ally = state.ships.find((ship) => ship.team === 'friendly' && ship.faction !== 'player');
+    const pirate = state.ships.find((ship) => ship.team === 'neutral');
+    if (!player || !ally || !pirate) throw new Error('missing');
+    state.playerInvuln = 0;
+    player.heading = 0;
+    player.reloadPort = 0;
+    ally.x = player.x - 8;
+    ally.z = player.z;
+    pirate.x = player.x + 8;
+    pirate.z = player.z;
+    pirate.hp = 16;
+    const allyHp = ally.hp;
+    tick(state, 0.05, { ...NO_INPUT, fireSmart: true });
+    for (let i = 0; i < 40; i += 1) tick(state, 1 / 60);
+    expect(ally.hp).toBe(allyHp);
+    expect(pirate.alive).toBe(false);
+    expect(state.match?.xp).toBeGreaterThan(0);
+  });
+
+  it('turns a kraken slam that empties the hull into a countdown and a second respawn', () => {
+    const state = voyage();
+    state.aiEnabled = false;
+    const player = getPlayer(state);
+    if (!player || !state.match) throw new Error('missing');
+    state.playerInvuln = 0;
+    player.hp = 18;
+    state.kraken = {
+      x: player.x,
+      z: player.z + 10,
+      hp: 100,
+      maxHp: 100,
+      alive: true,
+      phase: 'telegraph',
+      timer: 0.01,
+      markers: [{ x: player.x, z: player.z, radius: 9 }],
+      strikeApplied: false,
+      sinkT: 0,
+      hitFlash: 0,
+      anim: 0,
+    };
+    tick(state, 0.05);
+    expect(player.alive).toBe(false);
+    expect(player.hp).toBe(0);
+    expect(player.sinking).toBe(true);
+    expect(state.match.downed).toBe(true);
+    expect(state.match.objective).toContain('침몰');
+    expect(state.status).toBe('playing');
+    for (let i = 0; i < 30 * 9; i += 1) tick(state, 1 / 30);
+    expect(player.alive).toBe(true);
+    expect(player.hp).toBeGreaterThan(40);
   });
 });

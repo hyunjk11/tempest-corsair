@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { handlingFor } from '../src/sim/balance';
 import { createCampaign, fireBroadside, getPlayer, settleWorld, step } from '../src/sim/simulation';
-import { MATCH_TERRAIN, beginMatch, buyUpgrade, canBuyUpgrade, stepMatch } from '../src/sim/match';
+import { aimHint, MATCH_TERRAIN, beginMatch, buyUpgrade, canBuyUpgrade, stepMatch } from '../src/sim/match';
 import { terrainBlocks } from '../src/sim/terrain';
 import { NO_INPUT } from './helpers';
 
@@ -242,6 +242,62 @@ describe('harbor match', () => {
     expect(ally.hp).toBe(allyHp);
     expect(pirate.alive).toBe(false);
     expect(state.match?.xp).toBeGreaterThan(0);
+    expect(state.match?.strike).toContain('명중');
+  });
+
+  it('does not fire Space when the target is dead ahead', () => {
+    const state = voyage();
+    state.aiEnabled = false;
+    const player = getPlayer(state);
+    const pirate = state.ships.find((ship) => ship.team === 'neutral');
+    if (!player || !pirate) throw new Error('missing');
+    player.heading = 0;
+    player.reloadPort = 0;
+    player.reloadStarboard = 0;
+    pirate.x = player.x;
+    pirate.z = player.z + 20;
+    const shots = state.shotsFired;
+    tick(state, 0.05, { ...NO_INPUT, fireSmart: true });
+    expect(state.shotsFired).toBe(shots);
+    expect(aimHint(state)).toContain('돌리라');
+    expect(state.match?.objective).toContain('경험');
+  });
+
+  it('lets a pusher bombard the enemy fort once the lane opens', () => {
+    const state = voyage();
+    const away = state.match?.harbors.find((harbor) => harbor.id === 'away');
+    const pusher = state.ships.find((ship) => ship.duty === 'push' && ship.team === 'friendly');
+    if (!away || !pusher || !state.match) throw new Error('missing');
+    state.time = 110;
+    state.aiEnabled = true;
+    for (const ship of state.ships) {
+      if (ship.id === pusher.id || ship.faction === 'player') continue;
+      ship.x = -400;
+      ship.z = -400;
+    }
+    pusher.x = away.x;
+    pusher.z = away.z - 40;
+    pusher.heading = Math.PI / 2;
+    pusher.reloadPort = 0;
+    pusher.reloadStarboard = 0;
+    const before = away.hp;
+    for (let i = 0; i < 90; i += 1) tick(state, 1 / 30);
+    expect(away.hp).toBeLessThan(before);
+    expect(away.maxHp).toBeLessThan(400);
+    const player = getPlayer(state);
+    const decoy = state.ships.find((ship) => ship.team === 'neutral');
+    if (!player || !decoy) throw new Error('missing');
+    decoy.alive = true;
+    decoy.duty = 'prize';
+    decoy.x = 0;
+    decoy.z = 0;
+    player.x = away.x;
+    player.z = away.z - 30;
+    state.time = 120;
+    state.match.treasureSpawned = true;
+    tick(state, 0.05);
+    expect(state.match.objective).toContain('적 항구');
+    expect(state.match.objective).not.toContain('보물선');
   });
 
   it('turns a kraken slam that empties the hull into a countdown and a second respawn', () => {

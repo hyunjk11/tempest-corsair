@@ -8,6 +8,9 @@ export interface Intent {
   fire: Side | null;
 }
 
+/** Space fires only when a broadside is actually pointed at the target. */
+export const PLAYER_AIM = { min: 5.5, max: 52, error: 0.5 };
+
 export const PIRATE_FIRE = { min: 7, max: 46, error: 0.46 };
 export const NAVY_FIRE = { min: 18, max: 54, error: 0.27 };
 

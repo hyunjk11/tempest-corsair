@@ -1,4 +1,4 @@
-import { bestSide, intentFor, selectTarget } from './ai';
+import { bestSide, intentFor, PLAYER_AIM, selectTarget } from './ai';
 import {
   bountyFor,
   cannonProfile,
@@ -359,7 +359,7 @@ function controlPlayer(state: SimState, player: Ship, input: Input, dt: number):
     const target = nearestThreat(state, player);
     if (target) {
       const aim = bestSide(player, target.x, target.z);
-      if (aim.error < 1.4 && aim.dist < 48) fireBroadside(state, player, aim.side);
+      if (aim.error < PLAYER_AIM.error && aim.dist < PLAYER_AIM.max && aim.dist > PLAYER_AIM.min) fireBroadside(state, player, aim.side);
     }
   }
 }
@@ -536,6 +536,7 @@ function hitProjectile(state: SimState, projectileIndex: number): boolean {
     if (!ship.alive || ship.id === projectile.ownerId) continue;
     if (!ellipseHit(projectile.x, projectile.z, ship)) continue;
     if (!teamsClash(projectile.team, ship.team)) continue;
+    if (projectile.faction === 'player') notePlayerHit(state, ship.name, projectile.damage);
     damageShip(state, ship, projectile.damage, projectile.team);
     projectile.impact = 'ship';
     projectile.life = 0;
@@ -688,12 +689,19 @@ function updateWeather(state: SimState, dt: number): void {
   weather.windZ = Math.sin(weather.windAngle) * windSpeed;
 }
 
+function notePlayerHit(state: SimState, name: string, damage: number): void {
+  if (!state.match) return;
+  state.match.strike = `${name} 명중 ${Math.round(damage)}`;
+  state.match.strikeLeft = 1.4;
+}
+
 function hitHarbor(state: SimState, projectile: SimState['projectiles'][number]): boolean {
   if (!state.match || projectile.life <= 0) return false;
   for (const harbor of state.match.harbors) {
     if (harbor.hp <= 0 || harbor.team === projectile.team) continue;
     if (Math.hypot(projectile.x - harbor.x, projectile.z - harbor.z) > harbor.core) continue;
     harbor.hp = Math.max(0, harbor.hp - projectile.damage);
+    if (projectile.faction === 'player') notePlayerHit(state, harbor.name, projectile.damage);
     projectile.impact = 'ship';
     projectile.life = 0;
     state.events.push({ type: 'hit', x: harbor.x, z: harbor.z, text: harbor.id });

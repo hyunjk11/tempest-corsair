@@ -50,6 +50,9 @@ export interface MatchData {
   docked: boolean;
   /** Close enough to show the shop and the braking instruction. */
   nearDock: boolean;
+  /** Latest shot the player landed, shown on the helm line. */
+  strike: string;
+  strikeLeft: number;
   treasureSpawned: boolean;
   krakenSpawned: boolean;
   krakenRewarded: boolean;

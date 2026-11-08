@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { cannonProfile, FACTION_META, hullStats, playerShipName, STAGES } from '../sim/balance';
 import { forward, sideDirection } from '../sim/math';
 import { clearSave, readAnySave, writeSave, type SettingsSave } from '../sim/persistence';
-import { beginMatch, buyUpgrade, canBuyUpgrade, dockCost, stepMatch } from '../sim/match';
+import { aimHint, beginMatch, buyUpgrade, canBuyUpgrade, dockCost, stepMatch } from '../sim/match';
 import { createFishMesh, createHarborMesh, disposeObject, type HarborView } from '../render/harbor';
 import {
   advanceAfterVictory,
@@ -37,6 +37,14 @@ interface Progress {
   campaignCleared: boolean;
   pendingUpgrade: boolean;
   pendingPurchased: boolean;
+}
+
+function compassLabel(heading: number): string {
+  const names = ['북', '북동', '동', '남동', '남', '남서', '서', '북서'];
+  let value = heading;
+  while (value < 0) value += Math.PI * 2;
+  while (value >= Math.PI * 2) value -= Math.PI * 2;
+  return names[Math.round(value / (Math.PI / 4)) % 8] ?? '북';
 }
 
 function specOf(ship: Ship): ShipSpec {
@@ -169,6 +177,7 @@ export class Game {
   debugSnapshot(): {
     status: Status;
     stage: number;
+    time: number;
     gold: number;
     projectiles: number;
     weather: string;
@@ -190,6 +199,7 @@ export class Game {
     return {
       status: this.sim.status,
       stage: this.sim.stageIndex,
+      time: this.sim.time,
       gold: this.sim.gold,
       projectiles: this.sim.projectiles.length,
       weather: this.sim.weather.phase,
@@ -709,6 +719,7 @@ export class Game {
       awayHp: away ? away.hp / away.maxHp : 0,
       prompt: match?.prompt ?? '',
       dock,
+      helm: this.helmLine(player),
     });
     const seen = new Set<Faction>();
     const legend: { faction: Faction; label: string; color: string }[] = [];
@@ -720,6 +731,13 @@ export class Game {
     }
     this.ui.setLegend(legend);
     this.refreshSound();
+  }
+
+  private helmLine(player: Ship): string {
+    const speed = Math.max(0, Math.round(Math.abs(player.speed)));
+    const bow = compassLabel(player.heading);
+    const aim = aimHint(this.sim);
+    return aim ? `속력 ${speed} · 뱃머리 ${bow} · ${aim}` : `속력 ${speed} · 뱃머리 ${bow}`;
   }
 
   private dockLabel(track: Track): string {

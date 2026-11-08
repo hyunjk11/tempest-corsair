@@ -1,4 +1,4 @@
-import { avoidTerrainHeading, intentFor } from './ai';
+import { avoidTerrainHeading, bestSide, desiredBroadsideHeading, intentFor, PLAYER_AIM } from './ai';
 import { handlingFor, hullStats, playerShipName } from './balance';
 import { normalizeAngle, turnToward } from './math';
 import type { TerrainBody } from './terrain';
@@ -54,8 +54,8 @@ export function beginMatch(state: SimState): void {
   state.boundsOverride = MATCH_BOUNDS;
   state.campaignCleared = false;
   const harbors: Harbor[] = [
-    { id: 'home', team: 'friendly', name: '아군 항구', x: -24, z: -352, hp: 520, maxHp: 520, reload: 0.8, core: 7, dock: 30, gunRange: 26 },
-    { id: 'away', team: 'enemy', name: '적 항구', x: 28, z: 352, hp: 520, maxHp: 520, reload: 0.8, core: 7, dock: 18, gunRange: 26 },
+    { id: 'home', team: 'friendly', name: '아군 항구', x: -24, z: -352, hp: 300, maxHp: 300, reload: 0.8, core: 10, dock: 30, gunRange: 26 },
+    { id: 'away', team: 'enemy', name: '적 항구', x: 28, z: 352, hp: 220, maxHp: 220, reload: 0.8, core: 10, dock: 18, gunRange: 26 },
   ];
   const fish: FishSpot[] = [
     { id: 'f1', x: 42, z: -246, cooldown: 0 },
@@ -79,6 +79,8 @@ export function beginMatch(state: SimState): void {
     noticeLeft: 0,
     docked: false,
     nearDock: false,
+    strike: '',
+    strikeLeft: 0,
     treasureSpawned: false,
     krakenSpawned: false,
     krakenRewarded: false,
@@ -169,6 +171,7 @@ export function stepMatch(state: SimState, dt: number): void {
   const frame = Math.max(0, dt);
   const bodies = state.terrainOverride ?? [];
   match.noticeLeft = Math.max(0, match.noticeLeft - frame);
+  match.strikeLeft = Math.max(0, match.strikeLeft - frame);
   for (const spot of match.fish) spot.cooldown = Math.max(0, spot.cooldown - frame);
   match.pirateClock -= frame;
   harvestFish(state, match);
@@ -243,6 +246,11 @@ function orderFor(state: SimState, match: MatchData, ship: Ship, bodies: Terrain
   if (foe && (ship.team === 'neutral' || ship.duty !== 'push' || Math.hypot(foe.x - ship.x, foe.z - ship.z) < 30)) {
     return intentFor(ship, foe, bodies);
   }
+  const fort = ship.duty === 'push' ? opposingFort(match, ship) : null;
+  const fortOpen = ship.team === 'friendly' ? 100 : 140;
+  if (fort && state.time >= fortOpen && Math.hypot(fort.x - ship.x, fort.z - ship.z) < 90 && !nearestOther(ship, state.ships, 24)) {
+    return bombard(ship, fort, bodies);
+  }
   const goal = waypoint(state, match, ship);
   const desired = avoidTerrainHeading(ship, Math.atan2(goal.x - ship.x, goal.z - ship.z), bodies);
   const turn = turnToward(ship.heading, desired);
@@ -262,12 +270,33 @@ function waypoint(state: SimState, match: MatchData, ship: Ship): { x: number; z
   }
   if (state.kraken?.alive && ship.duty === 'push' && state.time > 120) return { x: state.kraken.x, z: state.kraken.z };
   const t = state.time;
+  const home = match.harbors.find((harbor) => harbor.id === 'home');
+  const away = match.harbors.find((harbor) => harbor.id === 'away');
   if (ship.team === 'enemy') {
-    const z = t < 80 ? 300 : t < 150 ? 150 : 20;
-    return { x: ship.anchorX * 0.25, z };
+    if (t < 80) return { x: ship.anchorX * 0.25, z: 300 };
+    if (t < 140) return { x: ship.anchorX * 0.2, z: 140 };
+    return { x: home?.x ?? 0, z: (home?.z ?? -352) + 80 };
   }
-  const z = t < 55 ? -410 : t < 110 ? -150 : -10;
-  return { x: ship.anchorX * 0.15, z };
+  if (t < 55) return { x: ship.anchorX * 0.15, z: -410 };
+  if (t < 100) return { x: ship.anchorX * 0.15, z: -40 };
+  return { x: away?.x ?? 28, z: (away?.z ?? 352) - 70 };
+}
+
+function opposingFort(match: MatchData, ship: Ship): { x: number; z: number } | null {
+  const id = ship.team === 'friendly' ? 'away' : ship.team === 'enemy' ? 'home' : '';
+  return match.harbors.find((harbor) => harbor.id === id) ?? null;
+}
+
+function bombard(ship: Ship, fort: { x: number; z: number }, bodies: TerrainBody[]): { throttle: number; turn: number; fire: null | 'port' | 'starboard' } {
+  const dx = fort.x - ship.x;
+  const dz = fort.z - ship.z;
+  const dist = Math.hypot(dx, dz) || 1;
+  const raw = dist > 46 ? Math.atan2(dx, dz) : dist < 30 ? Math.atan2(-dx, -dz) : desiredBroadsideHeading(ship.heading, dx, dz);
+  const desired = avoidTerrainHeading(ship, raw, bodies);
+  const aim = bestSide(ship, fort.x, fort.z);
+  const fire = aim.dist <= 56 && aim.dist >= 22 && aim.error < 0.45 ? aim.side : null;
+  const aligned = Math.abs(normalizeAngle(desired - ship.heading)) < 0.7;
+  return { throttle: aligned ? 0.7 : 0.85, turn: turnToward(ship.heading, desired), fire };
 }
 
 function nearestOther(ship: Ship, ships: readonly Ship[], maxDist: number): Ship | null {
@@ -461,6 +490,45 @@ function refillPirates(state: SimState, match: MatchData): void {
   match.pirateClock = 32;
 }
 
+export function aimHint(state: SimState): string {
+  const match = state.match;
+  const player = getPlayer(state);
+  if (!match || !player?.alive) return '';
+  if (match.strikeLeft > 0 && match.strike) return match.strike;
+  let name = '';
+  let x = 0;
+  let z = 0;
+  let best = 80;
+  for (const ship of state.ships) {
+    if (!ship.alive || ship.team === player.team) continue;
+    const dist = Math.hypot(ship.x - player.x, ship.z - player.z);
+    if (dist < best) {
+      best = dist;
+      name = ship.name;
+      x = ship.x;
+      z = ship.z;
+    }
+  }
+  if (!name) {
+    const fort = match.harbors.find((harbor) => harbor.team !== player.team && harbor.hp > 0);
+    if (fort) {
+      const dist = Math.hypot(fort.x - player.x, fort.z - player.z);
+      if (dist < 90) {
+        name = fort.name;
+        x = fort.x;
+        z = fort.z;
+        best = dist;
+      }
+    }
+  }
+  if (!name) return '';
+  const aim = bestSide(player, x, z);
+  const side = aim.side === 'port' ? '좌현' : '우현';
+  if (aim.error < PLAYER_AIM.error && aim.dist < PLAYER_AIM.max && aim.dist > PLAYER_AIM.min) return `${side} 조준 · ${name}`;
+  if (best < 80) return `${name} · ${side}으로 돌리라`;
+  return '';
+}
+
 function shopLine(state: SimState, match: MatchData): string {
   const next = state.upgrades.sails + 1;
   const cost = dockCost('sails', next);
@@ -478,16 +546,25 @@ function refreshCopy(state: SimState, match: MatchData): void {
   const home = match.harbors.find((harbor) => harbor.id === 'home');
   const prize = state.ships.some((ship) => ship.alive && ship.duty === 'prize');
   const kraken = Boolean(state.kraken?.alive);
+  const away = match.harbors.find((harbor) => harbor.id === 'away');
   const dx = player && home ? home.x - player.x : 0;
   const dz = player && home ? home.z - player.z : 0;
   const dist = player && home ? Math.hypot(dx, dz) : Infinity;
   const ahead = player ? Math.sin(player.heading) * dx + Math.cos(player.heading) * dz : 0;
+  const onFort = Boolean(player && away && Math.hypot(player.x - away.x, player.z - away.z) < 140);
   if (match.docked) match.objective = '노란 정비 원 안이다. 아래 버튼으로 선체·돛·함포를 사라';
   else if (player && dist < 170 && ahead > 6) match.objective = '아군 항구의 노란 원으로 들어가라. 전진을 놓으면 그 안에 선다';
+  else if (onFort) match.objective = '적 항구가 앞이다. 섬에 포탄이 맞으면 체력이 깎이고, 무너지면 이긴다';
   else if (kraken) match.objective = '크라켄은 가운데 바다에 있다. 초보 어장에는 오지 않는다';
   else if (prize) match.objective = '보물선이 가운데 수로에 있다. 적보다 먼저 쳐라';
-  else if (player && player.z < -180) match.objective = '뱃머리 방향의 고기 떼로 가라. 해적은 그보다 멀리 있다';
-  else match.objective = '가운데 수로 또는 섬 바깥 뱃길로 나아가라. 적 항구는 북쪽이다';
+  else if (match.level < 1) {
+    const remain = match.xpToNext - match.xp;
+    match.objective = remain > 22
+      ? `가까운 해적을 격침하라. 경험 ${match.xp}/${match.xpToNext}`
+      : `해적 한 척만 더. 경험 ${match.xp}/${match.xpToNext}이면 항구에서 돛`;
+  } else if (state.upgrades.sails < 1 && state.gold >= 36) match.objective = '금화가 돛값이다. 아군 항구 노란 원에서 사라';
+  else if (player && player.z > 200) match.objective = '적 항구가 앞이다. 섬에 포탄이 맞으면 체력이 깎이고, 무너지면 이긴다';
+  else match.objective = '가운데에서 적 함대와 붙어라. 그 다음 북쪽 적 항구를 포격한다';
   if (player?.alive && home && dist < Infinity) {
     const side = Math.cos(player.heading) * dx - Math.sin(player.heading) * dz;
     const where = ahead > 8 ? '뱃머리 쪽' : ahead < -8 ? '고물 쪽' : side > 0 ? '좌현' : '우현';

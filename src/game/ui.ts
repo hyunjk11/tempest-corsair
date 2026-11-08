@@ -22,6 +22,7 @@ export interface HudModel {
   homeHp: number;
   awayHp: number;
   prompt: string;
+  helm: string;
   dock: null | { hull: string; sails: string; cannons: string; hullOk: boolean; sailsOk: boolean; cannonsOk: boolean; note: string };
 }
 
@@ -230,6 +231,11 @@ export class Ui {
     const enemies = document.querySelector('#hud-enemies');
     if (enemies) enemies.textContent = `${model.enemyLabel} ${model.enemies}`;
     must<HTMLElement>('hull-text').textContent = model.hullText;
+    const helm = document.querySelector<HTMLElement>('#helm-line');
+    if (helm) {
+      helm.hidden = model.helm === '';
+      helm.textContent = model.helm;
+    }
     must<HTMLElement>('hull-fill').style.width = `${Math.max(0, Math.min(1, model.hull)) * 100}%`;
     must<HTMLElement>('port-fill').style.width = `${Math.max(0, Math.min(1, model.port)) * 100}%`;
     must<HTMLElement>('star-fill').style.width = `${Math.max(0, Math.min(1, model.starboard)) * 100}%`;

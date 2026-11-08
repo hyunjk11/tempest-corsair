@@ -1,4 +1,5 @@
-import { normalizeAngle, sideDirection, turnToward } from './math';
+import { forward, normalizeAngle, sideDirection, turnToward } from './math';
+import { terrainBlocks, type TerrainBody } from './terrain';
 import type { Ship, Side } from './types';
 
 export interface Intent {
@@ -97,4 +98,58 @@ export function navyIntent(ship: Ship, target: { x: number; z: number }): Intent
   const desired = navyDesiredHeading(ship.heading, dx, dz, dist);
   const throttle = dist > 44 ? 1 : 0.72;
   return intentFrom(ship, target, desired, throttle, NAVY_FIRE);
+}
+
+const STANDOFF = new Set<Ship['faction']>(['navy', 'company']);
+
+export function selectTarget(ship: Ship, ships: readonly Ship[]): Ship | null {
+  let best: Ship | null = null;
+  let bestScore = Infinity;
+  for (const other of ships) {
+    if (!other.alive || other.id === ship.id || other.faction === ship.faction) continue;
+    let score = Math.hypot(other.x - ship.x, other.z - ship.z);
+    if (ship.faction !== 'raider' && other.faction === 'player') score += 16;
+    if (other.id === ship.focusId) score -= 10;
+    if (score < bestScore) {
+      bestScore = score;
+      best = other;
+    }
+  }
+  return best;
+}
+
+export function avoidTerrainHeading(ship: Pick<Ship, 'x' | 'z' | 'heading' | 'beam'>, desired: number, bodies: readonly TerrainBody[]): number {
+  const padding = ship.beam * 0.55;
+  const clear = (heading: number, distance: number) => {
+    const nose = forward(heading);
+    return !terrainBlocks(ship.x + nose.x * distance, ship.z + nose.z * distance, padding, bodies);
+  };
+  if (clear(desired, 16) && clear(ship.heading, 9)) return desired;
+  let best = desired;
+  let bestScore = -Infinity;
+  for (let step = -8; step <= 8; step += 1) {
+    const heading = desired + step * 0.32;
+    let score = 0;
+    if (clear(heading, 7)) score += 3;
+    if (clear(heading, 14)) score += 2;
+    if (clear(heading, 22)) score += 1;
+    score -= Math.abs(normalizeAngle(heading - desired)) * 0.35;
+    if (score > bestScore) {
+      bestScore = score;
+      best = heading;
+    }
+  }
+  return best;
+}
+
+export function intentFor(ship: Ship, target: { x: number; z: number }, bodies: readonly TerrainBody[]): Intent {
+  const dx = target.x - ship.x;
+  const dz = target.z - ship.z;
+  const dist = Math.hypot(dx, dz);
+  const standoff = STANDOFF.has(ship.faction);
+  const raw = standoff ? navyDesiredHeading(ship.heading, dx, dz, dist) : pirateDesiredHeading(ship.heading, dx, dz, dist);
+  const desired = avoidTerrainHeading(ship, raw, bodies);
+  const window = standoff ? NAVY_FIRE : PIRATE_FIRE;
+  const throttle = standoff ? (dist > 44 ? 1 : 0.72) : dist > 36 ? 1 : dist < 12 ? 0.9 : 0.78;
+  return intentFrom(ship, target, desired, throttle, window);
 }

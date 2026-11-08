@@ -41,6 +41,20 @@ export function turnToward(current: number, desired: number): number {
   return Math.sign(diff);
 }
 
+/**
+ * Screen-right on the horizontal plane when the camera sits behind the ship
+ * and looks along its bow. At heading 0 this is world -X, which is starboard.
+ */
+export function chaseScreenRight(heading: number): Vec2 {
+  return { x: -Math.cos(heading), z: Math.sin(heading) };
+}
+
+/** Change in screen-right of the bow when heading increases. Negative means the bow swings screen-left. */
+export function bowScreenRightRate(heading: number): number {
+  const right = chaseScreenRight(heading);
+  return Math.cos(heading) * right.x + -Math.sin(heading) * right.z;
+}
+
 export function nextRandom(seed: number): { value: number; seed: number } {
   let state = seed >>> 0 || 1;
   state = (Math.imul(1664525, state) + 1013904223) >>> 0;

@@ -1,6 +1,18 @@
 import { clamp } from '../sim/math';
 import type { Input } from '../sim/types';
 
+/**
+ * Ship-relative helm.
+ * Positive turn increases heading, which yaws toward port (ship left, screen left
+ * with the chase camera). Right / starboard is therefore negative.
+ */
+export function sailingTurn(left: boolean, right: boolean): number {
+  let turn = 0;
+  if (left) turn += 1;
+  if (right) turn -= 1;
+  return clamp(turn, -1, 1);
+}
+
 const GAME_KEYS = new Set([
   'KeyW',
   'KeyA',
@@ -36,12 +48,9 @@ export class InputController {
     let throttle = 0;
     if (up) throttle += 1;
     if (down) throttle -= 0.55;
-    let turn = 0;
-    if (left) turn -= 1;
-    if (right) turn += 1;
     return {
       throttle: clamp(throttle, -0.55, 1),
-      turn: clamp(turn, -1, 1),
+      turn: sailingTurn(left, right),
       firePort: this.keys.has('KeyQ') || this.touch.port,
       fireStarboard: this.keys.has('KeyE') || this.touch.starboard,
       fireSmart: this.keys.has('Space') || this.touch.smart || this.mouseSmart,

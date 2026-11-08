@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { cannonProfile, hullStats, playerShipName, STAGES } from '../sim/balance';
+import { cannonProfile, FACTION_META, hullStats, playerShipName, STAGES } from '../sim/balance';
 import { forward, sideDirection } from '../sim/math';
 import { clearSave, readSave, writeSave, type SaveData } from '../sim/persistence';
 import {
@@ -14,14 +14,15 @@ import {
   step,
   threatCount,
 } from '../sim/simulation';
-import type { Ship, SimState, Status, Track } from '../sim/types';
+import type { Faction, Ship, SimState, Status, Track } from '../sim/types';
 import { createChest, Fx } from '../render/effects';
 import { createKrakenMesh, disposeKraken, updateKrakenMesh, type KrakenView } from '../render/krakenMesh';
 import { createOcean, OCEAN_SEGMENTS, OCEAN_SIZE } from '../render/ocean';
 import { createShipMesh, disposeShipView, paintShipBar, shipLookKey, type ShipSpec, type ShipView } from '../render/shipMesh';
 import { createBirds, createSky, SUN_DIR, updateBirds } from '../render/sky';
+import { createTerrainMesh, disposeTerrain } from '../render/terrain';
 import { waveHeight } from '../render/waves';
-import { Sfx } from './audio';
+import { Sfx, type AudioStatus } from './audio';
 import { bindHold, bindStick, InputController } from './input';
 import { drawRadar } from './radar';
 import { Ui, type HudModel } from './ui';
@@ -78,6 +79,8 @@ export class Game {
   private readonly ships = new Map<string, ShipView>();
   private readonly treasures = new Map<string, THREE.Group>();
   private kraken: KrakenView | null = null;
+  private terrainKey = '';
+  private readonly terrainMeshes: THREE.Group[] = [];
   private readonly look = new THREE.Vector3(0, 1, 0);
   private readonly camPos = new THREE.Vector3(-42, 30, -42);
   private readonly fogColor = new THREE.Color('#f2b07a');
@@ -111,6 +114,7 @@ export class Game {
       mute: (muted) => this.setMuted(muted),
       shake: (enabled) => this.setShake(enabled),
       pause: () => this.pause(),
+      toggleSound: () => this.toggleSound(),
     });
     this.input = new InputController(() => this.sim.status === 'playing');
     this.bindTouch();
@@ -158,8 +162,8 @@ export class Game {
     gold: number;
     projectiles: number;
     weather: string;
-    player: { x: number; z: number; hp: number; speed: number } | null;
-    enemies: { name: string; hp: number; alive: boolean }[];
+    player: { x: number; z: number; hp: number; speed: number; heading: number } | null;
+    enemies: { name: string; faction: Faction; hp: number; alive: boolean; x: number; z: number }[];
     kraken: { hp: number; phase: string; alive: boolean } | null;
   } {
     const player = getPlayer(this.sim);
@@ -169,10 +173,10 @@ export class Game {
       gold: this.sim.gold,
       projectiles: this.sim.projectiles.length,
       weather: this.sim.weather.phase,
-      player: player ? { x: player.x, z: player.z, hp: player.hp, speed: player.speed } : null,
+      player: player ? { x: player.x, z: player.z, hp: player.hp, speed: player.speed, heading: player.heading } : null,
       enemies: this.sim.ships
         .filter((ship) => ship.faction !== 'player')
-        .map((ship) => ({ name: ship.name, hp: ship.hp, alive: ship.alive })),
+        .map((ship) => ({ name: ship.name, faction: ship.faction, hp: ship.hp, alive: ship.alive, x: ship.x, z: ship.z })),
       kraken: this.sim.kraken
         ? { hp: this.sim.kraken.hp, phase: this.sim.kraken.phase, alive: this.sim.kraken.alive }
         : null,
@@ -183,7 +187,33 @@ export class Game {
     this.settings.muted = muted;
     this.sfx.setMuted(muted);
     this.ui.setSettings(this.settings.muted, this.settings.shake);
+    this.refreshSound();
     if (readSave(localStorage)) this.write();
+  }
+
+  audioStatus(): AudioStatus {
+    return this.sfx.status();
+  }
+
+  unlockAudio(): void {
+    this.sfx.unlock();
+    this.refreshSound();
+  }
+
+  debugTone(): void {
+    this.sfx.debugTone();
+  }
+
+  private toggleSound(): void {
+    this.sfx.unlock();
+    this.setMuted(!this.settings.muted);
+    if (!this.settings.muted) this.sfx.shot(0.8);
+  }
+
+  private refreshSound(): void {
+    const status = this.sfx.status();
+    const label = status.muted ? '소리 꺼짐' : status.context === 'running' ? '소리 켜짐' : '소리 대기';
+    this.ui.setSound(label, status.muted);
   }
 
   debugStorm(): void {
@@ -254,14 +284,16 @@ export class Game {
   private boot(): void {
     const save = readSave(localStorage);
     if (!save) {
-      this.ui.setSettings(false, true);
-      this.ui.showTitle({ canContinue: false, cleared: false });
+    this.ui.setSettings(false, true);
+    this.refreshSound();
+    this.ui.showTitle({ canContinue: false, cleared: false });
       return;
     }
     this.settings.muted = save.muted;
     this.settings.shake = save.shake;
     this.sfx.setMuted(save.muted);
     this.ui.setSettings(save.muted, save.shake);
+    this.refreshSound();
     this.progress = {
       stageIndex: save.stageIndex,
       gold: save.gold,
@@ -288,6 +320,7 @@ export class Game {
     else if (this.sim.status === 'victory' || this.sim.status === 'defeat' || this.sim.status === 'upgrade' || this.sim.status === 'ending') {
       coast(this.sim, dt);
     }
+    this.sfx.setWind(this.sim.weather.intensity);
     this.consumeEvents();
     if (before !== this.sim.status) this.noteTransition();
     this.syncWorld(dt);
@@ -296,24 +329,29 @@ export class Game {
   };
 
   private consumeEvents(): void {
-    let shot = false;
+    let playerShot = false;
+    let otherShot = false;
     let hit = false;
+    let splash = false;
     let pickup = false;
-    let slam = false;
     for (const event of this.sim.events) {
-      if (event.type === 'fire' && event.faction === 'player') shot = true;
-      if (event.type === 'hit' && event.faction === 'player') hit = true;
+      if (event.type === 'fire') {
+        if (event.faction === 'player') playerShot = true;
+        else otherShot = true;
+      }
+      if (event.type === 'hit') hit = true;
+      if (event.type === 'splash' || event.type === 'slam') splash = true;
       if (event.type === 'pickup') pickup = true;
-      if (event.type === 'slam') slam = true;
       if (!this.settings.shake) continue;
       if (event.type === 'fire' && event.faction === 'player') this.shake = Math.max(this.shake, 0.32);
       if (event.type === 'hit' && event.faction === 'player') this.shake = Math.max(this.shake, 0.55);
       if (event.type === 'slam') this.shake = Math.max(this.shake, 0.4);
     }
-    if (shot) this.sfx.shot();
+    if (playerShot) this.sfx.shot(1);
+    else if (otherShot) this.sfx.shot(0.62);
     if (hit) this.sfx.hit();
+    if (splash) this.sfx.splash();
     if (pickup) this.sfx.pickup();
-    if (slam) this.sfx.splash();
   }
 
   private noteTransition(): void {
@@ -339,6 +377,7 @@ export class Game {
     this.syncShips(storm);
     this.syncTreasures(storm);
     this.syncKraken();
+    this.syncTerrain();
     this.updateCamera(dt);
     this.fx.sync(this.sim, dt, this.time, this.camera);
     const focusX = this.look.x;
@@ -367,6 +406,31 @@ export class Game {
     }
     const player = getPlayer(this.sim);
     this.ui.setHit(player ? player.hitFlash / 0.22 : 0);
+  }
+
+  private syncTerrain(): void {
+    if (this.sim.ships.length === 0) {
+      this.clearTerrain();
+      return;
+    }
+    const key = `${this.sim.stageIndex}:${STAGES[this.sim.stageIndex]?.terrain.length ?? 0}`;
+    if (key === this.terrainKey) return;
+    this.clearTerrain();
+    this.terrainKey = key;
+    for (const body of STAGES[this.sim.stageIndex]?.terrain ?? []) {
+      const mesh = createTerrainMesh(body);
+      this.scene.add(mesh);
+      this.terrainMeshes.push(mesh);
+    }
+  }
+
+  private clearTerrain(): void {
+    for (const mesh of this.terrainMeshes) {
+      this.scene.remove(mesh);
+      disposeTerrain(mesh);
+    }
+    this.terrainMeshes.length = 0;
+    this.terrainKey = '';
   }
 
   private syncShips(storm: number): void {
@@ -457,7 +521,7 @@ export class Game {
     if (attractMode) this.ensureAttract();
     this.attract.group.visible = attractMode;
     this.attract.shadow.visible = attractMode;
-    const blend = 1 - Math.exp(-dt * (attractMode ? 1.3 : 2.7));
+    const blend = 1 - Math.exp(-dt * (attractMode ? 1.3 : 6.2));
     if (attractMode) {
       const angle = this.time * 0.15;
       const x = 18 + Math.sin(angle) * 3;
@@ -473,25 +537,12 @@ export class Game {
     } else {
       const player = getPlayer(this.sim);
       if (player) {
-        let lx = player.x;
-        let lz = player.z;
-        let count = 1;
-        for (const ship of this.sim.ships) {
-          if (!ship.alive || ship.faction === 'player') continue;
-          lx += ship.x;
-          lz += ship.z;
-          count += 1;
-        }
-        if (this.sim.kraken?.alive) {
-          lx += this.sim.kraken.x;
-          lz += this.sim.kraken.z;
-          count += 1;
-        }
-        const focus = new THREE.Vector3(player.x * 0.72 + (lx / count) * 0.28, 1.2, player.z * 0.72 + (lz / count) * 0.28);
-        const zoom = this.sim.kraken?.alive ? 1.12 : 1;
-        const desired = new THREE.Vector3(focus.x - 26 * zoom, 20 * zoom, focus.z - 26 * zoom);
-        desired.x += Math.sin(this.time * 1.7) * 0.4 * this.sim.weather.intensity;
-        desired.y += Math.cos(this.time * 2.1) * 0.25 * this.sim.weather.intensity;
+        const nose = forward(player.heading);
+        const zoom = this.sim.kraken?.alive ? 1.08 : 1;
+        const focus = new THREE.Vector3(player.x + nose.x * 12, 1.5, player.z + nose.z * 12);
+        const desired = new THREE.Vector3(player.x - nose.x * 30 * zoom, 17.5 * zoom, player.z - nose.z * 30 * zoom);
+        desired.x += Math.sin(this.time * 1.7) * 0.35 * this.sim.weather.intensity;
+        desired.y += Math.cos(this.time * 2.1) * 0.22 * this.sim.weather.intensity;
         if (this.shake > 0) {
           desired.x += (Math.random() - 0.5) * this.shake * 2.2;
           desired.y += (Math.random() - 0.5) * this.shake;
@@ -551,11 +602,21 @@ export class Game {
       starboard: 1 - player.reloadStarboard / guns.reload,
       kraken: krakenAlive && this.sim.kraken ? this.sim.kraken.hp / this.sim.kraken.maxHp : null,
       sailHint: this.sim.stageIndex === 0 && this.sim.stageTime < 12 && Math.abs(player.speed) < 2.4,
-      fireHint: this.sim.stageIndex === 0 && this.sim.shotsFired === 0 && this.sim.stageTime > 2.2 && this.sim.stageTime < 16,
+      fireHint: this.sim.stageIndex === 0 && this.sim.shotsFired === 0 && this.sim.stageTime > 2.2 && this.sim.stageTime < 18,
       banner,
       bannerKind,
       weather: this.sim.weather.phase,
     });
+    const seen = new Set<Faction>();
+    const legend: { faction: Faction; label: string; color: string }[] = [];
+    for (const ship of this.sim.ships) {
+      if (!ship.alive || ship.faction === 'player' || seen.has(ship.faction)) continue;
+      seen.add(ship.faction);
+      const meta = FACTION_META[ship.faction];
+      legend.push({ faction: ship.faction, label: meta.label, color: meta.color });
+    }
+    this.ui.setLegend(legend);
+    this.refreshSound();
   }
 
   private startNew(): void {
@@ -713,6 +774,7 @@ export class Game {
 
   private onKey = (event: KeyboardEvent): void => {
     if (event.repeat) return;
+    if (this.sim.status === 'playing' || this.sim.status === 'title') this.sfx.unlock();
     if (event.code === 'KeyR' && (this.sim.status === 'paused' || this.sim.status === 'defeat')) {
       this.retry();
       return;

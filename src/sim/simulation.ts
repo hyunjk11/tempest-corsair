@@ -1,4 +1,4 @@
-import { bestSide, navyIntent, pirateIntent } from './ai';
+import { bestSide, intentFor, selectTarget } from './ai';
 import {
   bountyFor,
   cannonProfile,
@@ -10,6 +10,7 @@ import {
   UPGRADE_COST,
 } from './balance';
 import { approach, clamp, forward, nextRandom, sideDirection } from './math';
+import { terrainHit } from './terrain';
 import type { Faction, Input, Kraken, Ship, Side, SimState, Track, Weather } from './types';
 
 export interface UpgradeResult {
@@ -106,11 +107,13 @@ function makePlayer(state: SimState, stageIndex: number): Ship {
     sinkT: 0,
     hitFlash: 0,
     collideCd: 0,
+    focusId: '',
   };
 }
 
 function makeEnemy(spawn: (typeof STAGES)[number]['enemies'][number], index: number, state: SimState): Ship {
-  const pirate = spawn.kind === 'pirate';
+  const heavy = spawn.kind === 'navy' || spawn.kind === 'company';
+  const raider = spawn.kind === 'raider';
   return {
     id: `${spawn.kind}-${index}-${state.nextId++}`,
     faction: spawn.kind,
@@ -122,9 +125,9 @@ function makeEnemy(spawn: (typeof STAGES)[number]['enemies'][number], index: num
     helm: 0,
     hp: spawn.hp,
     maxHp: spawn.hp,
-    length: pirate ? 8.6 : 11.4,
-    beam: pirate ? 2.7 : 3.2,
-    hullTier: pirate ? 0 : 1,
+    length: heavy ? (spawn.kind === 'navy' ? 11.4 : 10.6) : raider ? 7.4 : 8.6,
+    beam: heavy ? 3.15 : raider ? 2.35 : 2.7,
+    hullTier: heavy ? 1 : 0,
     sailTier: spawn.sailTier,
     cannonTier: spawn.cannonTier,
     reloadPort: 0.4 + index * 0.2,
@@ -134,6 +137,7 @@ function makeEnemy(spawn: (typeof STAGES)[number]['enemies'][number], index: num
     sinkT: 0,
     hitFlash: 0,
     collideCd: 0,
+    focusId: '',
   };
 }
 
@@ -302,13 +306,55 @@ function controlPlayer(state: SimState, player: Ship, input: Input, dt: number):
   }
 }
 
-function controlEnemies(state: SimState, player: Ship, dt: number): void {
+function controlEnemies(state: SimState, _player: Ship, dt: number): void {
   if (!state.aiEnabled || state.finale === 'defeat') return;
+  const bodies = STAGES[state.stageIndex]?.terrain ?? [];
   for (const ship of state.ships) {
     if (!ship.alive || ship.faction === 'player') continue;
-    const intent = ship.faction === 'navy' ? navyIntent(ship, player) : pirateIntent(ship, player);
+    const target = selectTarget(ship, state.ships);
+    if (!target) {
+      integrate(ship, 0.35, 0, dt, state.weather);
+      continue;
+    }
+    ship.focusId = target.id;
+    const intent = intentFor(ship, target, bodies);
     integrate(ship, intent.throttle, intent.turn, dt, state.weather);
     if (intent.fire && state.finale === null) fireBroadside(state, ship, intent.fire);
+  }
+}
+
+function resolveTerrain(state: SimState): void {
+  const bodies = STAGES[state.stageIndex]?.terrain ?? [];
+  if (bodies.length === 0) return;
+  for (const ship of state.ships) {
+    if (!ship.alive) continue;
+    for (let pass = 0; pass < 3; pass += 1) {
+      for (const body of bodies) {
+        const real = Math.hypot(ship.x - body.x, ship.z - body.z);
+        let dx = ship.x - body.x;
+        let dz = ship.z - body.z;
+        if (real < 0.001) {
+          dx = 1;
+          dz = 0;
+        }
+        const dist = Math.hypot(dx, dz) || 1;
+        const min = body.radius + ship.beam * 0.42;
+        if (real >= min) continue;
+        const nx = dx / dist;
+        const nz = dz / dist;
+        ship.x += nx * (min - real);
+        ship.z += nz * (min - real);
+        const nose = forward(ship.heading);
+        const outward = nose.x * nx + nose.z * nz;
+        const impact = Math.max(0, -ship.speed * outward);
+        if (impact > 5.5 && ship.collideCd <= 0) {
+          const taken = ship.faction === 'player' ? hullStats(ship.hullTier).collisionTaken : 1;
+          damageShip(state, ship, (5 + impact * 0.45) * taken);
+          ship.collideCd = 1.15;
+        }
+        if (outward < 0) ship.speed *= 0.28;
+      }
+    }
   }
 }
 
@@ -444,7 +490,15 @@ function advanceProjectiles(state: SimState, dt: number): void {
       projectile.x += projectile.vx * stepDt;
       projectile.z += projectile.vz * stepDt;
       projectile.life -= stepDt;
-      if (projectile.life > 0) hitProjectile(state, i);
+      if (projectile.life <= 0) continue;
+      const bodies = STAGES[state.stageIndex]?.terrain ?? [];
+      if (terrainHit(projectile.x, projectile.z, 0.35, bodies)) {
+        projectile.impact = 'water';
+        projectile.life = 0;
+        state.events.push({ type: 'splash', x: projectile.x, z: projectile.z, text: 'terrain' });
+        continue;
+      }
+      hitProjectile(state, i);
     }
   }
   for (const projectile of state.projectiles) {
@@ -611,6 +665,7 @@ export function step(state: SimState, input: Input, dt: number): void {
   if (player.alive) stepKraken(state, player, frame);
   advanceProjectiles(state, frame);
   resolveRams(state);
+  resolveTerrain(state);
   if (player.alive) {
     collectTreasure(state, player);
     separateFromKraken(player, state.kraken);

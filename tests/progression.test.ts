@@ -21,7 +21,7 @@ describe('stage progression and upgrades', () => {
     expect(STAGES[3]?.typhoonChance).toBeGreaterThan(0.5);
     expect(STAGES[5]?.kraken).toBeTruthy();
     expect(STAGES[2]?.enemies[0]?.kind).toBe('navy');
-    expect(STAGES[4]?.enemies.map((enemy) => enemy.kind).sort()).toEqual(['navy', 'pirate']);
+    expect(STAGES[4]?.enemies.map((enemy) => enemy.kind).sort()).toEqual(['company', 'navy', 'pirate', 'raider']);
   });
 
   it('advances only after a victory and heals into the next encounter', () => {
@@ -53,6 +53,9 @@ describe('stage progression and upgrades', () => {
     const state = fresh(5);
     state.aiEnabled = false;
     if (!state.kraken) throw new Error('kraken missing');
+    for (const ship of state.ships) {
+      if (ship.faction !== 'player') ship.hp = 0;
+    }
     state.kraken.hp = 0;
     step(state, NO_INPUT, 0.2);
     step(state, NO_INPUT, 1.2);

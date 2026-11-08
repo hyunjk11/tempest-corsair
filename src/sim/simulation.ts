@@ -9,7 +9,7 @@ import {
   STAGES,
   UPGRADE_COST,
 } from './balance';
-import { approach, clamp, forward, nextRandom, sideDirection } from './math';
+import { approach, clamp, forward, nextRandom, normalizeAngle, sideDirection } from './math';
 import { terrainHit } from './terrain';
 import type { Faction, Input, Kraken, Ship, Side, SimState, Team, Track, Weather } from './types';
 
@@ -277,7 +277,18 @@ function killShip(state: SimState, ship: Ship): void {
     if (ship.struckBy === 'friendly' && ship.team !== 'friendly') {
       if (ship.duty === 'prize') grantFriendly(state, 70, 40);
       else grantFriendly(state, ship.team === 'neutral' ? 18 : 24, ship.team === 'neutral' ? 22 : 12);
-      state.events.push({ type: 'pickup', x: ship.x, z: ship.z, faction: ship.faction, text: '포상' });
+      const gold = ship.duty === 'prize' ? 70 : ship.team === 'neutral' ? 18 : 24;
+      const xp = ship.duty === 'prize' ? 40 : ship.team === 'neutral' ? 22 : 12;
+      const line = `${ship.name} 격침 · 금화 +${gold} · 경험 +${xp}`;
+      state.match.notice = line;
+      state.match.noticeLeft = 4.2;
+      state.events.push({
+        type: 'pickup',
+        x: ship.x,
+        z: ship.z,
+        faction: ship.faction,
+        text: line,
+      });
     }
     return;
   }
@@ -306,7 +317,7 @@ function integrate(ship: Ship, throttle: number, turn: number, dt: number, weath
   const target = clamp(throttle, -0.65, 1) * maxSpeed;
   ship.speed = approach(ship.speed, target, stats.accel * dt);
   const speedFactor = 0.4 + 0.6 * Math.min(1, Math.abs(ship.speed) / Math.max(1, maxSpeed));
-  ship.heading += clamp(turn, -1, 1) * turnRate * speedFactor * dt;
+  ship.heading = normalizeAngle(ship.heading + clamp(turn, -1, 1) * turnRate * speedFactor * dt);
   ship.helm = clamp(turn, -1, 1);
   const nose = forward(ship.heading);
   ship.x += (nose.x * ship.speed + weather.windX) * dt;
@@ -325,7 +336,7 @@ function nearestThreat(state: SimState, player: Ship): { x: number; z: number } 
   let best: { x: number; z: number } | null = null;
   let bestDist = Infinity;
   for (const ship of state.ships) {
-    if (!ship.alive || ship.faction === 'player') continue;
+    if (!ship.alive || ship.team === player.team) continue;
     const dist = Math.hypot(ship.x - player.x, ship.z - player.z);
     if (dist < bestDist) {
       bestDist = dist;
@@ -348,7 +359,7 @@ function controlPlayer(state: SimState, player: Ship, input: Input, dt: number):
     const target = nearestThreat(state, player);
     if (target) {
       const aim = bestSide(player, target.x, target.z);
-      if (aim.error < 1.05 && aim.dist < 62) fireBroadside(state, player, aim.side);
+      if (aim.error < 1.4 && aim.dist < 48) fireBroadside(state, player, aim.side);
     }
   }
 }
@@ -458,7 +469,9 @@ function applySlam(state: SimState, kraken: Kraken, player: Ship): void {
       player.hp -= enraged ? 26 : 18;
       player.hitFlash = 0.22;
       state.playerInvuln = 0.5;
+      player.struckBy = 'neutral';
       state.events.push({ type: 'hit', x: player.x, z: player.z, faction: 'player' });
+      if (player.hp <= 0) killShip(state, player);
       break;
     }
   }
@@ -747,6 +760,9 @@ export function step(state: SimState, input: Input, dt: number): void {
     separateFromKraken(player, state.kraken);
   }
   for (const ship of state.ships) clampToBounds(ship, state.boundsOverride ?? stage.bounds);
+  for (const ship of state.ships) {
+    if (ship.alive && ship.hp <= 0) killShip(state, ship);
+  }
   evaluateFinale(state);
   if (state.finale) {
     state.finaleTimer -= frame;

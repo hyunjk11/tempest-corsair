@@ -24,6 +24,7 @@ declare global {
       unlockAudio: () => void;
       debugTone: () => void;
       startMatch: (phase?: string) => void;
+      debugHurt: () => void;
     };
   }
 }
@@ -37,4 +38,5 @@ window.__CORSAIR__ = {
   unlockAudio: () => game.unlockAudio(),
   debugTone: () => game.debugTone(),
   startMatch: (phase) => game.debugMatch(phase),
+  debugHurt: () => game.debugHurt(),
 };

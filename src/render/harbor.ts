@@ -37,6 +37,31 @@ export function createHarborMesh(harbor: Harbor): HarborView {
   );
   flag.position.set(0.55, 4.2, 0);
   group.add(flag);
+  const board = document.createElement('canvas');
+  board.width = 512;
+  board.height = 128;
+  const ctx = board.getContext('2d');
+  if (ctx) {
+    ctx.fillStyle = 'rgba(8, 16, 24, 0.82)';
+    ctx.fillRect(0, 0, 512, 128);
+    ctx.fillStyle = harbor.team === 'friendly' ? '#ffe08a' : '#9ec4f0';
+    ctx.font = '700 72px "WenQuanYi Micro Hei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(harbor.name, 256, 86);
+  }
+  const tex = new THREE.CanvasTexture(board);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sign = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+  sign.scale.set(16, 4, 1);
+  sign.position.y = 8.5;
+  group.add(sign);
+  const dock = new THREE.Mesh(
+    new THREE.TorusGeometry(harbor.dock, 0.18, 6, 40),
+    new THREE.MeshBasicMaterial({ color: harbor.team === 'friendly' ? '#ffe08a' : '#4aa3ff', transparent: true, opacity: 0.55 }),
+  );
+  dock.rotation.x = Math.PI / 2;
+  dock.position.y = 0.15;
+  group.add(dock);
   group.position.set(harbor.x, 0, harbor.z);
   return { group, flag, id: harbor.id };
 }

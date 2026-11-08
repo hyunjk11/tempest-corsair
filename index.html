@@ -122,16 +122,19 @@
             <button id="btn-pause" class="text-btn" type="button">일시정지</button>
           </div>
         </header>
-        <div id="legend" class="legend"></div>
+        <div class="hud-flags">
+          <div id="legend" class="legend"></div>
+          <div id="ports" class="ports">
+            <div class="glass port-chip"><span>아군 항구</span><div class="bar"><span id="home-fill"></span></div></div>
+            <div class="glass port-chip"><span>적 항구</span><div class="bar"><span id="away-fill"></span></div></div>
+          </div>
+        </div>
         <div id="banner" class="glass banner" hidden>
           <p id="banner-text"></p>
         </div>
         <div id="weather-chip" class="glass chip" hidden>태풍</div>
-        <div id="ports" class="ports">
-          <div class="glass port-chip"><span>아군 항구</span><div class="bar"><span id="home-fill"></span></div></div>
-          <div class="glass port-chip"><span>적 항구</span><div class="bar"><span id="away-fill"></span></div></div>
-        </div>
         <p id="harvest-prompt" class="glass prompt" hidden></p>
+        <p id="downed" class="glass downed" hidden></p>
         <div id="kraken-wrap" class="glass kraken-bar" hidden>
           <span>크라켄</span>
           <div class="bar"><span id="kraken-fill"></span></div>

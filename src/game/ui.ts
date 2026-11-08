@@ -22,7 +22,7 @@ export interface HudModel {
   homeHp: number;
   awayHp: number;
   prompt: string;
-  dock: null | { hull: string; sails: string; cannons: string; hullOk: boolean; sailsOk: boolean; cannonsOk: boolean };
+  dock: null | { hull: string; sails: string; cannons: string; hullOk: boolean; sailsOk: boolean; cannonsOk: boolean; note: string };
 }
 
 export interface UiHooks {
@@ -256,7 +256,8 @@ export class Ui {
     if (ports) ports.hidden = model.levelText === '';
     const prompt = document.querySelector<HTMLElement>('#harvest-prompt');
     if (prompt) {
-      prompt.hidden = model.prompt === '';
+      const shownInShop = Boolean(model.dock && model.dock.note === model.prompt);
+      prompt.hidden = model.prompt === '' || shownInShop;
       prompt.textContent = model.prompt;
     }
     const downed = document.querySelector<HTMLElement>('#downed');
@@ -278,6 +279,8 @@ export class Ui {
         hull.disabled = !model.dock.hullOk;
         sails.disabled = !model.dock.sailsOk;
         cannons.disabled = !model.dock.cannonsOk;
+        const note = document.querySelector<HTMLElement>('#dock-note');
+        if (note) note.textContent = model.dock.note;
       }
     }
   }

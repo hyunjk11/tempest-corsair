@@ -239,7 +239,7 @@ kbd {
 .prompt {
   position: absolute;
   left: 16px;
-  bottom: 214px;
+  bottom: 248px;
   padding: 8px 12px;
   max-width: min(460px, calc(100% - 250px));
   text-align: left;
@@ -254,7 +254,9 @@ kbd {
   font-weight: 700;
   border-color: #e07a3a;
 }
-.dock { display: flex; gap: 6px; margin-top: 8px; pointer-events: auto; }
+.dock { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; pointer-events: auto; }
+.dock p { margin: 0; color: #ffe08a; font-size: 13px; line-height: 1.35; }
+.dock-buttons { display: flex; gap: 6px; }
 .dock button {
   flex: 1;
   border: 1px solid rgba(226, 194, 122, 0.45);
@@ -266,7 +268,7 @@ kbd {
   font-size: 12px;
   font-weight: 700;
 }
-.dock button:disabled { opacity: 0.4; }
+.dock button:disabled { opacity: 0.78; }
 .kraken-bar {
   position: absolute;
   top: 148px;

@@ -55,13 +55,23 @@ export function createHarborMesh(harbor: Harbor): HarborView {
   sign.scale.set(16, 4, 1);
   sign.position.y = 8.5;
   group.add(sign);
+  const friendly = harbor.team === 'friendly';
   const dock = new THREE.Mesh(
-    new THREE.TorusGeometry(harbor.dock, 0.18, 6, 40),
-    new THREE.MeshBasicMaterial({ color: harbor.team === 'friendly' ? '#ffe08a' : '#4aa3ff', transparent: true, opacity: 0.55 }),
+    new THREE.TorusGeometry(harbor.dock, friendly ? 0.55 : 0.18, 8, 48),
+    new THREE.MeshBasicMaterial({ color: friendly ? '#ffe08a' : '#4aa3ff', transparent: true, opacity: friendly ? 0.95 : 0.45 }),
   );
   dock.rotation.x = Math.PI / 2;
-  dock.position.y = 0.15;
+  dock.position.y = 0.2;
   group.add(dock);
+  if (friendly) {
+    const buoyMat = new THREE.MeshBasicMaterial({ color: '#ffe08a' });
+    for (let i = 0; i < 4; i += 1) {
+      const angle = (i / 4) * Math.PI * 2;
+      const buoy = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 1.6, 6), buoyMat);
+      buoy.position.set(Math.cos(angle) * harbor.dock, 0.8, Math.sin(angle) * harbor.dock);
+      group.add(buoy);
+    }
+  }
   group.position.set(harbor.x, 0, harbor.z);
   return { group, flag, id: harbor.id };
 }

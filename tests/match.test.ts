@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { handlingFor } from '../src/sim/balance';
 import { createCampaign, fireBroadside, getPlayer, settleWorld, step } from '../src/sim/simulation';
-import { MATCH_TERRAIN, beginMatch, buyUpgrade, stepMatch } from '../src/sim/match';
+import { MATCH_TERRAIN, beginMatch, buyUpgrade, canBuyUpgrade, stepMatch } from '../src/sim/match';
 import { terrainBlocks } from '../src/sim/terrain';
 import { NO_INPUT } from './helpers';
 
@@ -275,5 +275,50 @@ describe('harbor match', () => {
     for (let i = 0; i < 30 * 9; i += 1) tick(state, 1 / 30);
     expect(player.alive).toBe(true);
     expect(player.hp).toBeGreaterThan(40);
+  });
+
+  it('explains a short approach and slows a rush into the service ring', () => {
+    const state = voyage();
+    state.aiEnabled = false;
+    const player = getPlayer(state);
+    const home = state.match?.harbors.find((harbor) => harbor.id === 'home');
+    if (!player || !home || !state.match) throw new Error('missing');
+    for (const ship of state.ships) {
+      if (ship.faction === 'player' || ship.team !== 'friendly') continue;
+      expect(Math.hypot(ship.x - home.x, ship.z - home.z)).toBeGreaterThan(home.dock);
+    }
+    player.x = home.x;
+    player.z = home.z + 26;
+    player.heading = Math.PI;
+    player.speed = 0;
+    state.gold = 35;
+    tick(state, 0.05);
+    expect(state.match.docked).toBe(true);
+    expect(state.match.nearDock).toBe(true);
+    expect(canBuyUpgrade(state, 'sails')).toMatchObject({ ok: false, reason: 'level' });
+    expect(state.match.prompt).toContain('레벨 1');
+    expect(state.match.prompt).toContain('경험 0/34');
+    expect(state.match.objective).toContain('노란 정비 원');
+    player.z = home.z + 50;
+    player.heading = Math.PI;
+    tick(state, 0.05);
+    expect(state.match.docked).toBe(false);
+    expect(state.match.nearDock).toBe(true);
+    expect(state.match.prompt).toContain('노란 정비 원까지');
+    expect(state.match.prompt).toContain('전진을 놓으면');
+    expect(state.match.prompt).not.toContain('전속');
+    expect(state.match.objective).toContain('전진을 놓으면');
+    expect(canBuyUpgrade(state, 'sails')).toMatchObject({ ok: false, reason: 'far' });
+    state.match.level = 1;
+    state.gold = 40;
+    player.z = home.z + 26;
+    expect(buyUpgrade(state, 'sails')).toEqual({ ok: true });
+    player.z = home.z + 40;
+    player.heading = Math.PI;
+    player.speed = 12;
+    const hold = { ...NO_INPUT, throttle: 1 };
+    for (let i = 0; i < 90; i += 1) tick(state, 1 / 30, hold);
+    expect(player.speed).toBeLessThan(6);
+    expect(Math.hypot(player.x - home.x, player.z - home.z)).toBeLessThan(home.dock);
   });
 });

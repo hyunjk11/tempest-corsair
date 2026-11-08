@@ -46,7 +46,10 @@ export interface MatchData {
   /** Short reward line that stays on the prompt after a kill or haul. */
   notice: string;
   noticeLeft: number;
+  /** Inside the yellow service ring. Purchases work here. */
   docked: boolean;
+  /** Close enough to show the shop and the braking instruction. */
+  nearDock: boolean;
   treasureSpawned: boolean;
   krakenSpawned: boolean;
   krakenRewarded: boolean;

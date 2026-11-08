@@ -54,7 +54,7 @@ export function beginMatch(state: SimState): void {
   state.boundsOverride = MATCH_BOUNDS;
   state.campaignCleared = false;
   const harbors: Harbor[] = [
-    { id: 'home', team: 'friendly', name: '아군 항구', x: -24, z: -352, hp: 520, maxHp: 520, reload: 0.8, core: 7, dock: 18, gunRange: 26 },
+    { id: 'home', team: 'friendly', name: '아군 항구', x: -24, z: -352, hp: 520, maxHp: 520, reload: 0.8, core: 7, dock: 30, gunRange: 26 },
     { id: 'away', team: 'enemy', name: '적 항구', x: 28, z: 352, hp: 520, maxHp: 520, reload: 0.8, core: 7, dock: 18, gunRange: 26 },
   ];
   const fish: FishSpot[] = [
@@ -78,6 +78,7 @@ export function beginMatch(state: SimState): void {
     notice: '',
     noticeLeft: 0,
     docked: false,
+    nearDock: false,
     treasureSpawned: false,
     krakenSpawned: false,
     krakenRewarded: false,
@@ -103,8 +104,8 @@ export function beginMatch(state: SimState): void {
   });
   state.ships = [
     player,
-    fleetShip(state, 'ally', 'friendly', 'defend', '등대 호위', -32, -344, 0.4, 90),
-    fleetShip(state, 'ally', 'friendly', 'push', '금빛 선수', -40, -336, 0.2, 84),
+    fleetShip(state, 'ally', 'friendly', 'defend', '등대 호위', -64, -340, 0.5, 90),
+    fleetShip(state, 'ally', 'friendly', 'push', '금빛 선수', -8, -400, 0.2, 84),
     fleetShip(state, 'navy', 'enemy', 'defend', '방파제', 18, 336, Math.PI, 110),
     fleetShip(state, 'navy', 'enemy', 'push', '북풍', -16, 318, Math.PI, 96),
     fleetShip(state, 'navy', 'enemy', 'push', '철닻', 36, 312, -2.4, 96),
@@ -174,6 +175,7 @@ export function stepMatch(state: SimState, dt: number): void {
   if (state.aiEnabled) steerFleets(state, match, bodies, frame);
   fireHarborGuns(state, match, frame);
   keepShipsOffForts(state, match);
+  easeDockApproach(state, match);
   tickRespawn(state, match, frame);
   maybeSpawnObjective(state, match);
   maybeTyphoon(state, match);
@@ -186,11 +188,13 @@ function harvestFish(state: SimState, match: MatchData): void {
   const player = getPlayer(state);
   match.prompt = '';
   match.docked = false;
+  match.nearDock = false;
   if (!player?.alive) return;
   const home = match.harbors.find((harbor) => harbor.id === 'home');
-  if (home && Math.hypot(player.x - home.x, player.z - home.z) <= home.dock) {
-    match.docked = true;
-    match.prompt = '아군 항구. 레벨이 되면 선체·돛·함포를 살 수 있다';
+  if (home) {
+    const dist = Math.hypot(player.x - home.x, player.z - home.z);
+    match.nearDock = dist <= home.dock + 46;
+    match.docked = dist <= home.dock;
   }
   for (const spot of match.fish) {
     const dist = Math.hypot(player.x - spot.x, player.z - spot.z);
@@ -262,7 +266,7 @@ function waypoint(state: SimState, match: MatchData, ship: Ship): { x: number; z
     const z = t < 80 ? 300 : t < 150 ? 150 : 20;
     return { x: ship.anchorX * 0.25, z };
   }
-  const z = t < 55 ? -330 : t < 110 ? -150 : -10;
+  const z = t < 55 ? -410 : t < 110 ? -150 : -10;
   return { x: ship.anchorX * 0.15, z };
 }
 
@@ -319,6 +323,7 @@ function fireHarborGuns(state: SimState, match: MatchData, dt: number): void {
 }
 
 function keepShipsOffForts(state: SimState, match: MatchData): void {
+  const home = match.harbors.find((harbor) => harbor.id === 'home');
   for (const harbor of match.harbors) {
     for (const ship of state.ships) {
       if (!ship.alive || ship.team === harbor.team) continue;
@@ -332,6 +337,30 @@ function keepShipsOffForts(state: SimState, match: MatchData): void {
       ship.speed *= 0.4;
     }
   }
+  if (!home) return;
+  for (const ship of state.ships) {
+    if (!ship.alive || ship.faction === 'player') continue;
+    const dx = ship.x - home.x;
+    const dz = ship.z - home.z;
+    const dist = Math.hypot(dx, dz) || 0.001;
+    const min = home.dock + 2;
+    if (dist >= min) continue;
+    ship.x = home.x + (dx / dist) * min;
+    ship.z = home.z + (dz / dist) * min;
+    ship.speed *= 0.45;
+  }
+}
+
+/** Rushing into the service ring settles to a speed the player can stop from. */
+function easeDockApproach(state: SimState, match: MatchData): void {
+  const player = getPlayer(state);
+  const home = match.harbors.find((harbor) => harbor.id === 'home');
+  if (!player?.alive || !home) return;
+  const dx = home.x - player.x;
+  const dz = home.z - player.z;
+  const dist = Math.hypot(dx, dz);
+  const ahead = Math.sin(player.heading) * dx + Math.cos(player.heading) * dz;
+  if (dist < home.dock + 4 && ahead > 0 && player.speed > 4.2) player.speed = 4.2;
 }
 
 function tickRespawn(state: SimState, match: MatchData, dt: number): void {
@@ -432,25 +461,41 @@ function refillPirates(state: SimState, match: MatchData): void {
   match.pirateClock = 32;
 }
 
+function shopLine(state: SimState, match: MatchData): string {
+  const next = state.upgrades.sails + 1;
+  const cost = dockCost('sails', next);
+  if (next > 3) return '정비 원 안이다. 돛은 이미 최대다';
+  if (match.level < next) {
+    return `정비 원 안. 돛은 레벨 ${next} · 경험 ${match.xp}/${match.xpToNext}. 중립 해적을 더 격침하라`;
+  }
+  if (cost !== null && state.gold < cost) return `정비 원 안. 돛은 금화 ${cost}, 지금 금화 ${state.gold}`;
+  return '정비 원 안이다. 아래 돛 버튼으로 살 수 있다';
+}
+
 function refreshCopy(state: SimState, match: MatchData): void {
   if (match.downed) return;
   const player = getPlayer(state);
   const home = match.harbors.find((harbor) => harbor.id === 'home');
   const prize = state.ships.some((ship) => ship.alive && ship.duty === 'prize');
   const kraken = Boolean(state.kraken?.alive);
-  if (match.docked) match.objective = '아군 항구 안이다. 아래 버튼으로 선체·돛·함포를 사라';
+  const dx = player && home ? home.x - player.x : 0;
+  const dz = player && home ? home.z - player.z : 0;
+  const dist = player && home ? Math.hypot(dx, dz) : Infinity;
+  const ahead = player ? Math.sin(player.heading) * dx + Math.cos(player.heading) * dz : 0;
+  if (match.docked) match.objective = '노란 정비 원 안이다. 아래 버튼으로 선체·돛·함포를 사라';
+  else if (player && dist < 170 && ahead > 6) match.objective = '아군 항구의 노란 원으로 들어가라. 전진을 놓으면 그 안에 선다';
   else if (kraken) match.objective = '크라켄은 가운데 바다에 있다. 초보 어장에는 오지 않는다';
   else if (prize) match.objective = '보물선이 가운데 수로에 있다. 적보다 먼저 쳐라';
   else if (player && player.z < -180) match.objective = '뱃머리 방향의 고기 떼로 가라. 해적은 그보다 멀리 있다';
   else match.objective = '가운데 수로 또는 섬 바깥 뱃길로 나아가라. 적 항구는 북쪽이다';
-  if (player?.alive && home) {
-    const dx = home.x - player.x;
-    const dz = home.z - player.z;
-    const dist = Math.hypot(dx, dz);
-    const ahead = Math.sin(player.heading) * dx + Math.cos(player.heading) * dz;
+  if (player?.alive && home && dist < Infinity) {
     const side = Math.cos(player.heading) * dx - Math.sin(player.heading) * dz;
     const where = ahead > 8 ? '뱃머리 쪽' : ahead < -8 ? '고물 쪽' : side > 0 ? '좌현' : '우현';
-    if (!match.docked && dist > home.dock) {
+    if (match.docked) match.prompt = shopLine(state, match);
+    else if (match.nearDock) {
+      const gap = Math.max(1, Math.round(dist - home.dock));
+      match.prompt = `노란 정비 원까지 ${gap}. 전진을 놓으면 배가 선다`;
+    } else if (dist > home.dock) {
       const speed = Math.max(8, handlingFor(player).maxSpeed);
       const guide = `아군 항구 ${Math.round(dist)} · ${where} · 전속 약 ${Math.max(1, Math.round(dist / speed))}초`;
       match.prompt = match.prompt ? `${match.prompt} · ${guide}` : guide;

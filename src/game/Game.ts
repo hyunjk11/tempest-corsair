@@ -673,7 +673,7 @@ export class Game {
     const match = this.sim.match;
     const home = match?.harbors.find((harbor) => harbor.id === 'home');
     const away = match?.harbors.find((harbor) => harbor.id === 'away');
-    const dock = match?.docked
+    const dock = match?.nearDock
       ? {
           hull: this.dockLabel('hull'),
           sails: this.dockLabel('sails'),
@@ -681,6 +681,7 @@ export class Game {
           hullOk: this.dockReady('hull'),
           sailsOk: this.dockReady('sails'),
           cannonsOk: this.dockReady('cannons'),
+          note: match.prompt,
         }
       : null;
     if (match) {
@@ -726,9 +727,12 @@ export class Game {
     const tier = this.sim.upgrades[track];
     const title = track === 'hull' ? '선체' : track === 'sails' ? '돛' : '함포';
     if (tier >= 3) return `${title} 최대`;
-    const cost = dockCost(track, tier + 1);
-    const need = match && match.level < tier + 1 ? ` Lv${tier + 1}` : '';
-    return `${title} ${cost ?? ''}${need}`;
+    const next = tier + 1;
+    const cost = dockCost(track, next);
+    if (match && match.level < next) return `${title} ${cost ?? ''} · Lv${next}`;
+    if (!match?.docked) return `${title} · 원 안`;
+    if (cost !== null && this.sim.gold < cost) return `${title} ${cost} · 부족`;
+    return `${title} ${cost ?? ''}`;
   }
 
   private dockReady(track: Track): boolean {

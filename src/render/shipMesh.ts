@@ -52,6 +52,17 @@ const PALETTE: Record<Faction, Palette> = {
     stripe: '#f7f4ee',
     torn: 0,
   },
+  ally: {
+    above: '#d7b07a',
+    below: '#7a5436',
+    rail: '#f7f1e2',
+    deck: '#e6d3a8',
+    sail: '#fff8ea',
+    sailAlt: '#f0e2c0',
+    flag: '#e2c27a',
+    stripe: '#2c62b5',
+    torn: 0,
+  },
   pirate: {
     above: '#b15a45',
     below: '#5a2822',
@@ -409,6 +420,10 @@ export function createShipMesh(spec: ShipSpec): ShipView {
     const tooth = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.16, 3), emblemMat);
     tooth.position.z = 0.02;
     flag.add(tooth);
+  } else if (spec.faction === 'ally') {
+    const sun = new THREE.Mesh(new THREE.CircleGeometry(0.09, 10), emblemMat);
+    sun.position.z = 0.02;
+    flag.add(sun);
   } else if (spec.faction === 'pirate') {
     const mark = new THREE.Mesh(new THREE.CircleGeometry(0.08, 10), emblemMat);
     mark.position.z = 0.02;

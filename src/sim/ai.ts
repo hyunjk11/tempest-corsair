@@ -106,7 +106,7 @@ export function selectTarget(ship: Ship, ships: readonly Ship[]): Ship | null {
   let best: Ship | null = null;
   let bestScore = Infinity;
   for (const other of ships) {
-    if (!other.alive || other.id === ship.id || other.faction === ship.faction) continue;
+    if (!other.alive || other.id === ship.id || other.team === ship.team) continue;
     let score = Math.hypot(other.x - ship.x, other.z - ship.z);
     if (ship.faction !== 'raider' && other.faction === 'player') score += 16;
     if (other.id === ship.focusId) score -= 10;

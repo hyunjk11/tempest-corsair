@@ -11,7 +11,7 @@ import {
 } from './balance';
 import { approach, clamp, forward, nextRandom, sideDirection } from './math';
 import { terrainHit } from './terrain';
-import type { Faction, Input, Kraken, Ship, Side, SimState, Track, Weather } from './types';
+import type { Faction, Input, Kraken, Ship, Side, SimState, Team, Track, Weather } from './types';
 
 export interface UpgradeResult {
   ok: boolean;
@@ -56,6 +56,9 @@ export function createCampaign(seed = 1): SimState {
     introTimer: 0,
     introText: '',
     events: [],
+    match: null,
+    terrainOverride: null,
+    boundsOverride: null,
   };
 }
 
@@ -70,6 +73,14 @@ export function threatCount(state: SimState): number {
 
 export function hostile(a: Faction, b: Faction): boolean {
   return a !== b;
+}
+
+export function teamsClash(a: Team, b: Team): boolean {
+  return a !== b;
+}
+
+function terrainOf(state: SimState) {
+  return state.terrainOverride ?? STAGES[state.stageIndex]?.terrain ?? [];
 }
 
 function rand(state: SimState): number {
@@ -108,6 +119,11 @@ function makePlayer(state: SimState, stageIndex: number): Ship {
     hitFlash: 0,
     collideCd: 0,
     focusId: '',
+    team: 'player',
+    duty: '',
+    anchorX: stage.playerX,
+    anchorZ: stage.playerZ,
+    struckBy: '',
   };
 }
 
@@ -138,6 +154,11 @@ function makeEnemy(spawn: (typeof STAGES)[number]['enemies'][number], index: num
     hitFlash: 0,
     collideCd: 0,
     focusId: '',
+    team: spawn.kind,
+    duty: '',
+    anchorX: spawn.x,
+    anchorZ: spawn.z,
+    struckBy: '',
   };
 }
 
@@ -157,6 +178,9 @@ export function beginStage(state: SimState, index: number): void {
   state.introTimer = 4.6;
   state.introText = stage.objective;
   state.playerInvuln = 0;
+  state.match = null;
+  state.terrainOverride = null;
+  state.boundsOverride = null;
   state.shotsFired = 0;
   state.goldAtStageStart = state.gold;
   state.weather = CALM_WEATHER();
@@ -214,6 +238,7 @@ export function fireBroadside(state: SimState, ship: Ship, side: Side): number {
       id: state.nextId++,
       ownerId: ship.id,
       faction: ship.faction,
+      team: ship.team,
       x,
       z,
       vx: Math.sin(angle) * stats.shotSpeed + nose.x * ship.speed * 0.35,
@@ -231,11 +256,31 @@ export function fireBroadside(state: SimState, ship: Ship, side: Side): number {
   return stats.shots;
 }
 
+function grantFriendly(state: SimState, gold: number, xp: number): void {
+  state.gold += gold;
+  const match = state.match;
+  if (!match) return;
+  match.xp += xp;
+  while (match.level < 5 && match.xp >= match.xpToNext) {
+    match.xp -= match.xpToNext;
+    match.level += 1;
+    match.xpToNext = 34 + match.level * 26;
+  }
+}
+
 function killShip(state: SimState, ship: Ship): void {
   if (!ship.alive) return;
   ship.alive = false;
   ship.sinking = true;
   ship.hp = 0;
+  if (state.match) {
+    if (ship.struckBy === 'friendly' && ship.team !== 'friendly') {
+      if (ship.duty === 'prize') grantFriendly(state, 70, 40);
+      else grantFriendly(state, ship.team === 'neutral' ? 18 : 24, ship.team === 'neutral' ? 22 : 12);
+      state.events.push({ type: 'pickup', x: ship.x, z: ship.z, faction: ship.faction, text: '포상' });
+    }
+    return;
+  }
   if (ship.faction !== 'player') {
     const gold = bountyFor(ship.faction, state.stageIndex);
     state.gold += gold;
@@ -243,10 +288,12 @@ function killShip(state: SimState, ship: Ship): void {
   }
 }
 
-function damageShip(state: SimState, ship: Ship, amount: number): void {
+function damageShip(state: SimState, ship: Ship, amount: number, by: Team | '' = ''): void {
   if (!ship.alive) return;
+  if (state.playerInvuln > 0 && ship.faction === 'player') return;
   ship.hp -= amount;
   ship.hitFlash = 0.16;
+  if (by) ship.struckBy = by;
   state.events.push({ type: 'hit', x: ship.x, z: ship.z, faction: ship.faction });
   if (ship.hp <= 0) killShip(state, ship);
 }
@@ -306,9 +353,22 @@ function controlPlayer(state: SimState, player: Ship, input: Input, dt: number):
   }
 }
 
+export function moveShip(ship: Ship, throttle: number, turn: number, dt: number, weather: Weather): void {
+  integrate(ship, throttle, turn, dt, weather);
+}
+
+export function settleWorld(state: SimState): void {
+  resolveTerrain(state);
+  const stage = STAGES[state.stageIndex];
+  const bounds = state.boundsOverride ?? stage?.bounds ?? 90;
+  for (const ship of state.ships) {
+    if (ship.alive) clampToBounds(ship, bounds);
+  }
+}
+
 function controlEnemies(state: SimState, _player: Ship, dt: number): void {
-  if (!state.aiEnabled || state.finale === 'defeat') return;
-  const bodies = STAGES[state.stageIndex]?.terrain ?? [];
+  if (state.match || !state.aiEnabled || state.finale === 'defeat') return;
+  const bodies = terrainOf(state);
   for (const ship of state.ships) {
     if (!ship.alive || ship.faction === 'player') continue;
     const target = selectTarget(ship, state.ships);
@@ -324,7 +384,7 @@ function controlEnemies(state: SimState, _player: Ship, dt: number): void {
 }
 
 function resolveTerrain(state: SimState): void {
-  const bodies = STAGES[state.stageIndex]?.terrain ?? [];
+  const bodies = terrainOf(state);
   if (bodies.length === 0) return;
   for (const ship of state.ships) {
     if (!ship.alive) continue;
@@ -461,9 +521,9 @@ function hitProjectile(state: SimState, projectileIndex: number): boolean {
   if (!projectile || projectile.life <= 0) return false;
   for (const ship of state.ships) {
     if (!ship.alive || ship.id === projectile.ownerId) continue;
-    if (!hostile(projectile.faction, ship.faction)) continue;
     if (!ellipseHit(projectile.x, projectile.z, ship)) continue;
-    damageShip(state, ship, projectile.damage);
+    if (!teamsClash(projectile.team, ship.team)) continue;
+    damageShip(state, ship, projectile.damage, projectile.team);
     projectile.impact = 'ship';
     projectile.life = 0;
     return true;
@@ -491,7 +551,8 @@ function advanceProjectiles(state: SimState, dt: number): void {
       projectile.z += projectile.vz * stepDt;
       projectile.life -= stepDt;
       if (projectile.life <= 0) continue;
-      const bodies = STAGES[state.stageIndex]?.terrain ?? [];
+      const bodies = terrainOf(state);
+      if (hitHarbor(state, projectile)) continue;
       if (terrainHit(projectile.x, projectile.z, 0.35, bodies)) {
         projectile.impact = 'water';
         projectile.life = 0;
@@ -535,8 +596,8 @@ function resolveRams(state: SimState): void {
       const base = 5 + relative * 0.28;
       const dealt = (ship: Ship) => (ship.faction === 'player' ? hullStats(ship.hullTier).collisionDealt : 1);
       const taken = (ship: Ship) => (ship.faction === 'player' ? hullStats(ship.hullTier).collisionTaken : 1);
-      damageShip(state, a, base * dealt(b) * taken(a));
-      damageShip(state, b, base * dealt(a) * taken(b));
+      damageShip(state, a, base * dealt(b) * taken(a), b.team);
+      damageShip(state, b, base * dealt(a) * taken(b), a.team);
       a.collideCd = 0.85;
       b.collideCd = 0.85;
     }
@@ -614,7 +675,22 @@ function updateWeather(state: SimState, dt: number): void {
   weather.windZ = Math.sin(weather.windAngle) * windSpeed;
 }
 
+function hitHarbor(state: SimState, projectile: SimState['projectiles'][number]): boolean {
+  if (!state.match || projectile.life <= 0) return false;
+  for (const harbor of state.match.harbors) {
+    if (harbor.hp <= 0 || harbor.team === projectile.team) continue;
+    if (Math.hypot(projectile.x - harbor.x, projectile.z - harbor.z) > harbor.core) continue;
+    harbor.hp = Math.max(0, harbor.hp - projectile.damage);
+    projectile.impact = 'ship';
+    projectile.life = 0;
+    state.events.push({ type: 'hit', x: harbor.x, z: harbor.z, text: harbor.id });
+    return true;
+  }
+  return false;
+}
+
 function evaluateFinale(state: SimState): void {
+  if (state.match) return;
   const stage = STAGES[state.stageIndex];
   const player = getPlayer(state);
   if (!stage || !player) return;
@@ -670,7 +746,7 @@ export function step(state: SimState, input: Input, dt: number): void {
     collectTreasure(state, player);
     separateFromKraken(player, state.kraken);
   }
-  for (const ship of state.ships) clampToBounds(ship, stage.bounds);
+  for (const ship of state.ships) clampToBounds(ship, state.boundsOverride ?? stage.bounds);
   evaluateFinale(state);
   if (state.finale) {
     state.finaleTimer -= frame;

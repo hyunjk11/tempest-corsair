@@ -1,17 +1,11 @@
-import type { Upgrades } from './types';
+export const SAVE_KEY = 'tempest-corsair-v2';
 
-export const SAVE_KEY = 'tempest-corsair-v1';
-
-export interface SaveData {
-  v: 1;
-  stageIndex: number;
-  gold: number;
-  upgrades: Upgrades;
-  campaignCleared: boolean;
-  pendingUpgrade: boolean;
-  pendingPurchased: boolean;
+export interface SettingsSave {
+  v: 2;
   muted: boolean;
   shake: boolean;
+  /** A chapter save from the previous voyage. It does not resume a stage. */
+  legacyCampaign: boolean;
 }
 
 export interface KeyValueStore {
@@ -20,48 +14,34 @@ export interface KeyValueStore {
   removeItem(key: string): void;
 }
 
-function isTier(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 3;
-}
-
-export function parseSave(raw: string | null): SaveData | null {
+export function parseSave(raw: string | null): SettingsSave | null {
   if (!raw) return null;
   try {
-    const data = JSON.parse(raw) as Partial<SaveData>;
-    if (data.v !== 1) return null;
-    if (typeof data.stageIndex !== 'number' || !Number.isInteger(data.stageIndex) || data.stageIndex < 0 || data.stageIndex > 5) {
-      return null;
+    const data = JSON.parse(raw) as { v?: unknown; muted?: unknown; shake?: unknown; stageIndex?: unknown };
+    if (data.v === 1 && typeof data.stageIndex === 'number') {
+      return { v: 2, muted: data.muted === true, shake: data.shake !== false, legacyCampaign: true };
     }
-    if (typeof data.gold !== 'number' || !Number.isFinite(data.gold) || data.gold < 0) return null;
-    const upgrades = data.upgrades;
-    if (!upgrades || !isTier(upgrades.hull) || !isTier(upgrades.sails) || !isTier(upgrades.cannons)) return null;
-    if (typeof data.campaignCleared !== 'boolean') return null;
-    if (typeof data.pendingUpgrade !== 'boolean') return null;
-    if (typeof data.pendingPurchased !== 'boolean') return null;
-    return {
-      v: 1,
-      stageIndex: data.stageIndex,
-      gold: data.gold,
-      upgrades: { hull: upgrades.hull, sails: upgrades.sails, cannons: upgrades.cannons },
-      campaignCleared: data.campaignCleared,
-      pendingUpgrade: data.pendingUpgrade,
-      pendingPurchased: data.pendingPurchased,
-      muted: data.muted === true,
-      shake: data.shake !== false,
-    };
+    if (data.v !== 2) return null;
+    return { v: 2, muted: data.muted === true, shake: data.shake !== false, legacyCampaign: false };
   } catch {
     return null;
   }
 }
 
-export function writeSave(store: KeyValueStore, data: SaveData): void {
+export function writeSave(store: KeyValueStore, data: SettingsSave): void {
   store.setItem(SAVE_KEY, JSON.stringify(data));
 }
 
-export function readSave(store: KeyValueStore): SaveData | null {
+export function readSave(store: KeyValueStore): SettingsSave | null {
   return parseSave(store.getItem(SAVE_KEY));
+}
+
+/** Reads whichever key is present so an old chapter save still migrates. */
+export function readAnySave(store: KeyValueStore): SettingsSave | null {
+  return parseSave(store.getItem(SAVE_KEY) ?? store.getItem('tempest-corsair-v1'));
 }
 
 export function clearSave(store: KeyValueStore): void {
   store.removeItem(SAVE_KEY);
+  store.removeItem('tempest-corsair-v1');
 }
